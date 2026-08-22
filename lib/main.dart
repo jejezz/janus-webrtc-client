@@ -3,7 +3,7 @@ import 'package:permission_handler/permission_handler.dart';
 
 import 'config/tls_bootstrap.dart';
 import 'ui/theme/app_theme.dart';
-import 'ui/sip_login_screen.dart';
+import 'ui/connect_screen.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -32,7 +32,7 @@ class JanusClientApp extends StatelessWidget {
       title: 'Janus SIP Client',
       debugShowCheckedModeBanner: false,
       theme: buildAppTheme(),
-      home: const SipLoginScreen(),
+      home: const ConnectScreen(),
     );
   }
 }

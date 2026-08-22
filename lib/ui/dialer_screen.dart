@@ -9,6 +9,7 @@ import 'device_registration_screen.dart';
 import 'theme/app_theme.dart';
 import 'widgets/aurora_background.dart';
 import 'widgets/glass.dart';
+import 'widgets/janus_mark.dart';
 import 'widgets/pulse_avatar.dart';
 
 /// 등록이 끝난 뒤의 화면. 발신과 착신 응답을 모두 여기서 처리한다.
@@ -123,6 +124,8 @@ class _DialerScreenState extends State<DialerScreen> {
               : 'SIP 등록 대기 중',
         ),
         const Spacer(),
+        const Center(child: JanusMark(width: 150)),
+        const SizedBox(height: 28),
         GlassCard(
           padding: const EdgeInsets.fromLTRB(20, 20, 20, 24),
           child: Column(
