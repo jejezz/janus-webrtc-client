@@ -6,6 +6,7 @@
 
   모티브: 주고받는 말풍선(통화) + 좌우로 퍼지는 시그널 아크(WebRTC).
   가운데 글리프는 `assets/icon/glyph_source.png` 를 그대로 얹는다.
+  오른쪽 위 글자는 같은 계열의 다른 앱과 홈 화면에서 구별하기 위한 표식이다.
 
 같은 좌표계를 Flutter 쪽 JanusMark 위젯이 그대로 쓰므로, 글리프를 고치면
 `assets/icon/call_glyph.png` 가 다시 생성되어 앱 화면에도 함께 반영된다.
@@ -18,7 +19,7 @@ import math
 from pathlib import Path
 
 import numpy as np
-from PIL import Image, ImageDraw, ImageFilter
+from PIL import Image, ImageDraw, ImageFilter, ImageFont
 
 ROOT = Path(__file__).resolve().parent.parent
 U = 1024.0  # 도형 좌표계 기준 크기
@@ -36,6 +37,21 @@ GLYPH_SIZE = 450          # 긴 변 기준, 1024 좌표계. 아크와 붙지 않
 GLYPH_GLOW = (56, 189, 248)
 MONO_CUT = 212            # 이보다 밝은 픽셀은 테마 아이콘에서 파낸다
 
+# ── 앱 구분 표식 ──────────────────────────────────────────────────────────────
+# 같은 계열의 다른 앱(SIP 판)과 홈 화면에서 골라 누를 수 있도록 한 글자만 넣는다.
+# 무슨 뜻인지 읽히지 않아도 되고, W 와 S 가 서로 달라 보이기만 하면 된다.
+BADGE_TEXT = "W"
+BADGE_CENTER = (860, 220)   # 1024 좌표계, 글자 중심
+BADGE_HEIGHT = 150          # 대문자 높이
+BADGE_COLOR = (255, 255, 255)
+# 개발 머신에 있는 굵은 산세리프를 순서대로 찾는다. Flutter SDK 의 Roboto 가
+# 첫 후보다 — 아이콘 나머지와 결이 맞고 라이선스도 걸리지 않는다.
+BADGE_FONT_CANDIDATES = [
+    Path.home() / "FlutterProject/flutter/bin/cache/artifacts/material_fonts/Roboto-Black.ttf",
+    Path("/System/Library/Fonts/Supplemental/Arial Black.ttf"),
+    Path("/System/Library/Fonts/Supplemental/Arial Bold.ttf"),
+]
+
 # ── 시그널 아크 ───────────────────────────────────────────────────────────────
 ARC_RIGHT = (103, 232, 249)
 ARC_LEFT = (249, 168, 212)
@@ -44,7 +60,7 @@ ARC_SPAN = 50                 # 중심선 기준 ±각도
 ARCS = [(330, 26, 1.00), (400, 20, 0.62)]  # 반경, 두께, 알파
 
 # 마크가 차지하는 영역. Flutter 의 JanusMark 도 같은 값을 쓴다.
-CONTENT = (100, 176, 924, 824)
+CONTENT = (74, 150, 950, 850)
 
 
 def draw_glyph(size: int = 2560, mono: bool = False) -> Image.Image:
@@ -77,6 +93,39 @@ def draw_glyph(size: int = 2560, mono: bool = False) -> Image.Image:
     return layer
 
 
+def _badge_font(pixel_height: float) -> ImageFont.FreeTypeFont:
+    for path in BADGE_FONT_CANDIDATES:
+        if path.exists():
+            # 요청한 대문자 높이가 나오도록 한 번 재어 보고 크기를 맞춘다.
+            probe = ImageFont.truetype(str(path), 100)
+            box = probe.getbbox(BADGE_TEXT)
+            measured = box[3] - box[1]
+            return ImageFont.truetype(str(path), int(100 * pixel_height / measured))
+    raise FileNotFoundError(
+        "표식에 쓸 폰트를 찾지 못했습니다. BADGE_FONT_CANDIDATES 에 경로를 추가하세요.")
+
+
+def draw_badge(size: int, mono: bool) -> Image.Image:
+    """오른쪽 위 한 글자."""
+    scale = size / U
+    layer = Image.new("RGBA", (size, size), (0, 0, 0, 0))
+    d = ImageDraw.Draw(layer)
+    font = _badge_font(BADGE_HEIGHT * scale)
+    center = (BADGE_CENTER[0] * scale, BADGE_CENTER[1] * scale)
+    color = (255, 255, 255) if mono else BADGE_COLOR
+
+    if not mono:  # 배경이 밝은 자리에서도 읽히도록 그림자를 깔아 둔다
+        shadow = Image.new("RGBA", (size, size), (0, 0, 0, 0))
+        ImageDraw.Draw(shadow).text(
+            (center[0], center[1] + 4 * scale), BADGE_TEXT,
+            font=font, fill=(10, 8, 40, 160), anchor="mm")
+        layer.alpha_composite(shadow.filter(
+            ImageFilter.GaussianBlur(6 * scale)))
+
+    d.text(center, BADGE_TEXT, font=font, fill=color + (255,), anchor="mm")
+    return layer
+
+
 def draw_arcs(size: int, mono: bool) -> Image.Image:
     scale = size / U
     layer = Image.new("RGBA", (size, size), (0, 0, 0, 0))
@@ -101,6 +150,7 @@ def draw_mark(size: int = 2560, mono: bool = False) -> Image.Image:
         glow.paste(GLYPH_GLOW + (190,), (0, 0), glyph.split()[3])
         layer.alpha_composite(glow.filter(ImageFilter.GaussianBlur(size * 0.022)))
     layer.alpha_composite(glyph)
+    layer.alpha_composite(draw_badge(size, mono))
     return layer
 
 
@@ -193,8 +243,10 @@ def save(img: Image.Image, rel: str, size: int, mode: str = "RGB") -> None:
 
 def main() -> None:
     full = master_full()
-    fg = place_mark(Image.new("RGBA", (MASTER, MASTER), (0, 0, 0, 0)), 0.60)
-    fg_mono = place_mark(Image.new("RGBA", (MASTER, MASTER), (0, 0, 0, 0)), 0.60,
+    # adaptive icon 은 원형 마스크가 씌워질 수 있어 모서리가 잘린다.
+    # 오른쪽 위 표식까지 안전 영역(안쪽 원) 에 들어오도록 비율을 낮춰 둔다.
+    fg = place_mark(Image.new("RGBA", (MASTER, MASTER), (0, 0, 0, 0)), 0.50)
+    fg_mono = place_mark(Image.new("RGBA", (MASTER, MASTER), (0, 0, 0, 0)), 0.50,
                          mono=True)
     bg_only = make_background(MASTER).convert("RGB")
 
