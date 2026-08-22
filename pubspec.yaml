@@ -68,6 +68,8 @@ flutter:
   assets:
     # 사설 CA(dev_ca.pem) 를 두는 자리. 자세한 내용은 assets/certs/README.md 참고.
     - assets/certs/
+    # 앱 아이콘과 같은 말풍선 마크. JanusMark 위젯이 읽는다.
+    - assets/icon/call_glyph.png
 
   # To add assets to your application, add an assets section, like this:
   # assets:

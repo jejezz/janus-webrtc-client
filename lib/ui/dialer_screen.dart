@@ -6,6 +6,10 @@ import 'package:flutter_webrtc/flutter_webrtc.dart';
 import '../config/sip_config.dart';
 import '../services/sip_service.dart';
 import 'device_registration_screen.dart';
+import 'theme/app_theme.dart';
+import 'widgets/aurora_background.dart';
+import 'widgets/glass.dart';
+import 'widgets/pulse_avatar.dart';
 
 /// 등록이 끝난 뒤의 화면. 발신과 착신 응답을 모두 여기서 처리한다.
 class DialerScreen extends StatefulWidget {
@@ -57,6 +61,7 @@ class _DialerScreenState extends State<DialerScreen> {
         if (!didPop) _hangUpAndLeave();
       },
       child: Scaffold(
+        extendBodyBehindAppBar: true,
         appBar: AppBar(
           title: const Text('인터폰 통화'),
           actions: [
@@ -78,19 +83,22 @@ class _DialerScreenState extends State<DialerScreen> {
             ),
           ],
         ),
-        body: SafeArea(
-          child: ListenableBuilder(
-            listenable: service,
-            builder: (context, _) => Padding(
-              padding: const EdgeInsets.all(24),
-              child: switch (service.callState) {
-                CallState.none => _buildIdle(context),
-                CallState.incoming => _buildIncoming(context),
-                CallState.outgoing ||
-                CallState.ringing =>
-                  _buildOutgoing(context),
-                CallState.active => _buildActive(context),
-              },
+        body: ListenableBuilder(
+          listenable: service,
+          builder: (context, _) => AuroraBackground(
+            // 통화 중에는 배경 연산을 멈춰 오디오 쪽에 자원을 넘긴다.
+            animate: service.callState != CallState.active,
+            child: SafeArea(
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(20, 8, 20, 20),
+                child: switch (service.callState) {
+                  CallState.none => _buildIdle(context),
+                  CallState.incoming => _buildIncoming(context),
+                  CallState.outgoing ||
+                  CallState.ringing => _buildOutgoing(context),
+                  CallState.active => _buildActive(context),
+                },
+              ),
             ),
           ),
         ),
@@ -101,74 +109,71 @@ class _DialerScreenState extends State<DialerScreen> {
   // -------------------------------------------------------------- 대기 화면
 
   Widget _buildIdle(BuildContext context) {
+    final service = widget.service;
+    final registered = service.isRegistered;
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        _buildRegistrationBadge(context),
+        StatusPill(
+          tone: registered ? StatusTone.success : StatusTone.warning,
+          icon: registered ? Icons.check_circle : Icons.sync,
+          message: registered
+              ? '내선 ${service.extension} 등록됨 · ${SipConfig.domain}'
+              : 'SIP 등록 대기 중',
+        ),
         const Spacer(),
-        TextField(
-          controller: _callee,
-          keyboardType: TextInputType.text,
-          autocorrect: false,
-          textAlign: TextAlign.center,
-          style: const TextStyle(fontSize: 24, letterSpacing: 2),
-          decoration: const InputDecoration(
-            labelText: '상대 번호',
-            helperText: '내선 번호 또는 sip: 로 시작하는 전체 URI',
-            border: OutlineInputBorder(),
+        GlassCard(
+          padding: const EdgeInsets.fromLTRB(20, 20, 20, 24),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              const SectionLabel('상대 번호', icon: Icons.dialpad),
+              const SizedBox(height: 18),
+              TextField(
+                controller: _callee,
+                keyboardType: TextInputType.text,
+                autocorrect: false,
+                textAlign: TextAlign.center,
+                style: const TextStyle(
+                  fontSize: 30,
+                  fontWeight: FontWeight.w600,
+                  letterSpacing: 4,
+                ),
+                decoration: const InputDecoration(
+                  hintText: '1001',
+                  hintStyle: TextStyle(color: Colors.white24, letterSpacing: 4),
+                ),
+              ),
+              const SizedBox(height: 12),
+              const Text(
+                '내선 번호 또는 sip: 로 시작하는 전체 URI',
+                textAlign: TextAlign.center,
+                style: TextStyle(fontSize: 12, color: Colors.white38),
+              ),
+            ],
           ),
         ),
         const SizedBox(height: 24),
-        FilledButton.icon(
+        GlowButton(
+          label: '전화 걸기',
+          icon: Icons.call,
+          gradient: AppPalette.liveGradient,
           onPressed: () {
             final target = _callee.text.trim();
             if (target.isEmpty) return;
             FocusScope.of(context).unfocus();
             widget.service.call(target);
           },
-          style: FilledButton.styleFrom(backgroundColor: Colors.green),
-          icon: const Icon(Icons.call),
-          label: const Padding(
-            padding: EdgeInsets.symmetric(vertical: 14),
-            child: Text('전화 걸기', style: TextStyle(fontSize: 16)),
-          ),
         ),
         const Spacer(),
-        if (widget.service.errorMessage != null)
-          Text(
-            widget.service.errorMessage!,
-            textAlign: TextAlign.center,
-            style: const TextStyle(color: Colors.redAccent, fontSize: 13),
+        if (service.errorMessage != null)
+          StatusPill(
+            tone: StatusTone.danger,
+            icon: Icons.error_outline,
+            message: service.errorMessage!,
           ),
       ],
-    );
-  }
-
-  Widget _buildRegistrationBadge(BuildContext context) {
-    final service = widget.service;
-    final registered = service.isRegistered;
-    final color = registered ? Colors.greenAccent : Colors.amber;
-
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-      decoration: BoxDecoration(
-        color: color.withValues(alpha: 0.12),
-        borderRadius: BorderRadius.circular(8),
-      ),
-      child: Row(
-        children: [
-          Icon(registered ? Icons.check_circle : Icons.sync, color: color, size: 18),
-          const SizedBox(width: 8),
-          Expanded(
-            child: Text(
-              registered
-                  ? '내선 ${service.extension} 등록됨 · ${SipConfig.domain}'
-                  : 'SIP 등록 대기 중',
-              style: TextStyle(color: color, fontSize: 13),
-            ),
-          ),
-        ],
-      ),
     );
   }
 
@@ -180,10 +185,11 @@ class _DialerScreenState extends State<DialerScreen> {
       context,
       title: widget.service.peer ?? '',
       subtitle: ringing ? '상대 단말이 울리는 중…' : '발신 중…',
+      accent: AppPalette.cyan,
       actions: [
-        _circleButton(
+        CircleActionButton(
           onPressed: widget.service.hangup,
-          color: Colors.redAccent,
+          color: AppPalette.danger,
           icon: Icons.call_end,
           label: '끊기',
         ),
@@ -198,16 +204,17 @@ class _DialerScreenState extends State<DialerScreen> {
       context,
       title: widget.service.peer ?? '',
       subtitle: '걸려온 전화',
+      accent: AppPalette.pink,
       actions: [
-        _circleButton(
+        CircleActionButton(
           onPressed: () => widget.service.declineCall(),
-          color: Colors.redAccent,
+          color: AppPalette.danger,
           icon: Icons.call_end,
           label: '거절',
         ),
-        _circleButton(
+        CircleActionButton(
           onPressed: widget.service.acceptCall,
-          color: Colors.green,
+          color: AppPalette.success,
           icon: Icons.call,
           label: '받기',
         ),
@@ -223,22 +230,26 @@ class _DialerScreenState extends State<DialerScreen> {
       context,
       title: service.peer ?? '',
       subtitle: _formatDuration(service.connectedAt),
+      accent: AppPalette.success,
+      connected: true,
       actions: [
-        _circleButton(
+        CircleActionButton(
           onPressed: service.toggleMic,
-          color: service.micMuted ? Colors.orange : Colors.blueGrey,
+          color: service.micMuted ? AppPalette.warning : AppPalette.cyan,
+          filled: false,
           icon: service.micMuted ? Icons.mic_off : Icons.mic,
           label: service.micMuted ? '음소거 중' : '마이크',
         ),
-        _circleButton(
+        CircleActionButton(
           onPressed: service.toggleSpeaker,
-          color: service.speakerOn ? Colors.blue : Colors.blueGrey,
+          color: service.speakerOn ? AppPalette.cyan : Colors.white70,
+          filled: false,
           icon: service.speakerOn ? Icons.volume_up : Icons.hearing,
           label: service.speakerOn ? '스피커' : '수화기',
         ),
-        _circleButton(
+        CircleActionButton(
           onPressed: service.hangup,
-          color: Colors.redAccent,
+          color: AppPalette.danger,
           icon: Icons.call_end,
           label: '끊기',
         ),
@@ -260,28 +271,44 @@ class _DialerScreenState extends State<DialerScreen> {
     BuildContext context, {
     required String title,
     required String subtitle,
+    required Color accent,
     required List<Widget> actions,
+    bool connected = false,
   }) {
     return Column(
       children: [
         const Spacer(),
-        const CircleAvatar(radius: 44, child: Icon(Icons.doorbell, size: 40)),
-        const SizedBox(height: 20),
+        PulseAvatar(color: accent, animate: !connected),
+        const SizedBox(height: 12),
         Text(
           title,
-          style: const TextStyle(fontSize: 28, fontWeight: FontWeight.w600),
+          style: const TextStyle(
+            fontSize: 30,
+            fontWeight: FontWeight.w700,
+            letterSpacing: 0.5,
+          ),
           textAlign: TextAlign.center,
         ),
         const SizedBox(height: 8),
-        Text(subtitle, style: const TextStyle(fontSize: 15, color: Colors.white60)),
+        Text(
+          subtitle,
+          style: TextStyle(
+            fontSize: connected ? 20 : 15,
+            color: connected ? accent : Colors.white60,
+            fontWeight: connected ? FontWeight.w600 : FontWeight.w400,
+            letterSpacing: connected ? 1.5 : 0.2,
+          ),
+        ),
         const Spacer(),
         _buildDiagnostics(context),
-        const SizedBox(height: 20),
+        const SizedBox(height: 24),
         Row(
-          mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+          mainAxisAlignment: actions.length == 1
+              ? MainAxisAlignment.center
+              : MainAxisAlignment.spaceEvenly,
           children: actions,
         ),
-        const SizedBox(height: 24),
+        const SizedBox(height: 16),
       ],
     );
   }
@@ -304,16 +331,14 @@ class _DialerScreenState extends State<DialerScreen> {
       _ => '새 연결',
     };
 
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-      decoration: BoxDecoration(
-        color: Colors.white10,
-        borderRadius: BorderRadius.circular(8),
-      ),
+    return GlassCard(
+      padding: const EdgeInsets.fromLTRB(16, 14, 16, 14),
+      radius: 20,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
+          const SectionLabel('미디어 상태', icon: Icons.insights_outlined),
+          const SizedBox(height: 10),
           _diagRow('ICE', iceLabel, ok: d.iceConnected),
           if (d.audioCodec != null)
             _diagRow(
@@ -348,16 +373,25 @@ class _DialerScreenState extends State<DialerScreen> {
   }
 
   Widget _diagRow(String label, String value, {required bool ok}) {
-    final color = ok ? Colors.greenAccent : Colors.orangeAccent;
+    final color = ok ? AppPalette.success : AppPalette.warning;
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 2),
+      padding: const EdgeInsets.symmetric(vertical: 3),
       child: Row(
         children: [
-          Icon(ok ? Icons.check_circle : Icons.remove_circle_outline,
-              size: 14, color: color),
-          const SizedBox(width: 8),
+          Container(
+            width: 7,
+            height: 7,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              color: color,
+              boxShadow: [
+                BoxShadow(color: color.withValues(alpha: 0.6), blurRadius: 8),
+              ],
+            ),
+          ),
+          const SizedBox(width: 10),
           SizedBox(
-            width: 64,
+            width: 62,
             child: Text(label,
                 style: const TextStyle(fontSize: 12, color: Colors.white54)),
           ),
@@ -372,33 +406,5 @@ class _DialerScreenState extends State<DialerScreen> {
   String _kb(int bytes) {
     if (bytes < 1024) return '$bytes B';
     return '${(bytes / 1024).toStringAsFixed(1)} KB';
-  }
-
-  Widget _circleButton({
-    required VoidCallback onPressed,
-    required Color color,
-    required IconData icon,
-    required String label,
-  }) {
-    return Column(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        SizedBox(
-          width: 64,
-          height: 64,
-          child: FilledButton(
-            onPressed: onPressed,
-            style: FilledButton.styleFrom(
-              backgroundColor: color,
-              shape: const CircleBorder(),
-              padding: EdgeInsets.zero,
-            ),
-            child: Icon(icon, size: 28),
-          ),
-        ),
-        const SizedBox(height: 8),
-        Text(label, style: const TextStyle(fontSize: 12)),
-      ],
-    );
   }
 }

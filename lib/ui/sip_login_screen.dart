@@ -4,6 +4,10 @@ import '../config/janus_config.dart';
 import '../services/sip_service.dart';
 import 'dialer_screen.dart';
 import 'echo_test_screen.dart';
+import 'theme/app_theme.dart';
+import 'widgets/aurora_background.dart';
+import 'widgets/glass.dart';
+import 'widgets/janus_mark.dart';
 
 /// 서버 접속 정보와 SIP 계정을 받아 등록까지 진행한다.
 class SipLoginScreen extends StatefulWidget {
@@ -91,95 +95,143 @@ class _SipLoginScreenState extends State<SipLoginScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('인터폰 통화')),
-      body: SafeArea(
-        child: ListenableBuilder(
-          listenable: _service,
-          builder: (context, _) => SingleChildScrollView(
-            padding: const EdgeInsets.all(24),
-            child: Form(
-              key: _formKey,
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  TextFormField(
-                    controller: _serverUrl,
-                    keyboardType: TextInputType.url,
-                    autocorrect: false,
-                    decoration: const InputDecoration(
-                      labelText: 'Janus 시그널링 주소',
-                      helperText: 'WebSocket 은 /janus-ws · REST 는 /janus-api',
-                      border: OutlineInputBorder(),
+      body: AuroraBackground(
+        child: SafeArea(
+          child: ListenableBuilder(
+            listenable: _service,
+            builder: (context, _) => SingleChildScrollView(
+              padding: const EdgeInsets.fromLTRB(20, 8, 20, 32),
+              child: Form(
+                key: _formKey,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    _buildHero(context),
+                    const SizedBox(height: 28),
+                    GlassCard(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          const SectionLabel('시그널링 서버',
+                              icon: Icons.dns_outlined),
+                          const SizedBox(height: 16),
+                          TextFormField(
+                            controller: _serverUrl,
+                            keyboardType: TextInputType.url,
+                            autocorrect: false,
+                            decoration: const InputDecoration(
+                              labelText: 'Janus 시그널링 주소',
+                              helperText:
+                                  'WebSocket 은 /janus-ws · REST 는 /janus-api',
+                              prefixIcon: Icon(Icons.link, size: 20),
+                            ),
+                            validator: (v) {
+                              final base = _required(v, '서버 주소');
+                              if (base != null) return base;
+                              if (!JanusConfig.isSupportedUrl(v!.trim())) {
+                                return 'ws:// wss:// http:// https:// 중 하나여야 합니다';
+                              }
+                              return null;
+                            },
+                          ),
+                          const SizedBox(height: 18),
+                          TextFormField(
+                            controller: _apiSecret,
+                            autocorrect: false,
+                            decoration: const InputDecoration(
+                              labelText: 'API Secret',
+                              helperText: '없으면 모든 요청이 403 으로 거절됩니다',
+                              prefixIcon: Icon(Icons.vpn_key_outlined, size: 20),
+                            ),
+                            validator: (v) => _required(v, 'API Secret'),
+                          ),
+                        ],
+                      ),
                     ),
-                    validator: (v) {
-                      final base = _required(v, '서버 주소');
-                      if (base != null) return base;
-                      if (!JanusConfig.isSupportedUrl(v!.trim())) {
-                        return 'ws:// wss:// http:// https:// 중 하나여야 합니다';
-                      }
-                      return null;
-                    },
-                  ),
-                  const SizedBox(height: 16),
-                  TextFormField(
-                    controller: _apiSecret,
-                    autocorrect: false,
-                    decoration: const InputDecoration(
-                      labelText: 'API Secret',
-                      helperText: '없으면 모든 요청이 403 으로 거절됩니다',
-                      border: OutlineInputBorder(),
+                    const SizedBox(height: 16),
+                    GlassCard(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          const SectionLabel('SIP 계정',
+                              icon: Icons.badge_outlined),
+                          const SizedBox(height: 16),
+                          TextFormField(
+                            controller: _extension,
+                            keyboardType: TextInputType.text,
+                            autocorrect: false,
+                            decoration: const InputDecoration(
+                              labelText: '내선 번호',
+                              helperText: 'Kamailio 에 만든 계정 (예: 1001)',
+                              prefixIcon: Icon(Icons.dialpad, size: 20),
+                            ),
+                            validator: (v) => _required(v, '내선 번호'),
+                          ),
+                          const SizedBox(height: 18),
+                          TextFormField(
+                            controller: _password,
+                            obscureText: true,
+                            autocorrect: false,
+                            decoration: const InputDecoration(
+                              labelText: '계정 비밀번호',
+                              prefixIcon: Icon(Icons.lock_outline, size: 20),
+                            ),
+                            validator: (v) => _required(v, '비밀번호'),
+                          ),
+                        ],
+                      ),
                     ),
-                    validator: (v) => _required(v, 'API Secret'),
-                  ),
-                  const Divider(height: 40),
-                  TextFormField(
-                    controller: _extension,
-                    keyboardType: TextInputType.text,
-                    autocorrect: false,
-                    decoration: const InputDecoration(
-                      labelText: '내선 번호',
-                      helperText: 'Kamailio 에 만든 계정 (예: 1001)',
-                      border: OutlineInputBorder(),
+                    const SizedBox(height: 20),
+                    _buildStatus(context),
+                    GlowButton(
+                      label: _busy ? '등록 중…' : 'SIP 등록',
+                      icon: Icons.login,
+                      busy: _busy,
+                      onPressed: _register,
                     ),
-                    validator: (v) => _required(v, '내선 번호'),
-                  ),
-                  const SizedBox(height: 16),
-                  TextFormField(
-                    controller: _password,
-                    obscureText: true,
-                    autocorrect: false,
-                    decoration: const InputDecoration(
-                      labelText: '계정 비밀번호',
-                      border: OutlineInputBorder(),
+                    const SizedBox(height: 12),
+                    OutlinedButton.icon(
+                      onPressed: _openEchoTest,
+                      icon: const Icon(Icons.graphic_eq, size: 18),
+                      label: const Padding(
+                        padding: EdgeInsets.symmetric(vertical: 12),
+                        child: Text('EchoTest 로 연결만 확인'),
+                      ),
                     ),
-                    validator: (v) => _required(v, '비밀번호'),
-                  ),
-                  const SizedBox(height: 24),
-                  _buildStatus(context),
-                  const SizedBox(height: 16),
-                  FilledButton.icon(
-                    onPressed: _busy ? null : _register,
-                    icon: const Icon(Icons.login),
-                    label: Padding(
-                      padding: const EdgeInsets.symmetric(vertical: 12),
-                      child: Text(_busy ? '등록 중…' : 'SIP 등록'),
-                    ),
-                  ),
-                  const SizedBox(height: 12),
-                  OutlinedButton.icon(
-                    onPressed: _openEchoTest,
-                    icon: const Icon(Icons.graphic_eq),
-                    label: const Padding(
-                      padding: EdgeInsets.symmetric(vertical: 12),
-                      child: Text('EchoTest 로 연결만 확인'),
-                    ),
-                  ),
-                ],
+                  ],
+                ),
               ),
             ),
           ),
         ),
       ),
+    );
+  }
+
+  /// 아이콘의 통화 마크를 그대로 첫 화면 대문으로 쓴다.
+  Widget _buildHero(BuildContext context) {
+    return Column(
+      children: [
+        const JanusMark(width: 168),
+        const SizedBox(height: 4),
+        const Text(
+          'Janus Client',
+          style: TextStyle(
+            fontSize: 28,
+            fontWeight: FontWeight.w700,
+            letterSpacing: -0.4,
+          ),
+        ),
+        const SizedBox(height: 6),
+        Text(
+          '인터폰 통화 · SIP over WebRTC',
+          style: TextStyle(
+            fontSize: 13,
+            color: AppPalette.mist.withValues(alpha: 0.72),
+            letterSpacing: 0.4,
+          ),
+        ),
+      ],
     );
   }
 
@@ -189,40 +241,23 @@ class _SipLoginScreenState extends State<SipLoginScreen> {
 
   Widget _buildStatus(BuildContext context) {
     final message = _service.errorMessage;
-    if (message == null) {
-      if (!_busy) return const SizedBox.shrink();
-      return const Row(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          SizedBox(
-            width: 16,
-            height: 16,
-            child: CircularProgressIndicator(strokeWidth: 2),
-          ),
-          SizedBox(width: 12),
-          Text('서버에 등록하는 중…'),
-        ],
+    if (message != null) {
+      return Padding(
+        padding: const EdgeInsets.only(bottom: 16),
+        child: StatusPill(
+          tone: StatusTone.danger,
+          icon: Icons.error_outline,
+          message: message,
+        ),
       );
     }
-
-    return Container(
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: Colors.redAccent.withValues(alpha: 0.12),
-        borderRadius: BorderRadius.circular(8),
-      ),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const Icon(Icons.error_outline, color: Colors.redAccent, size: 18),
-          const SizedBox(width: 8),
-          Expanded(
-            child: Text(
-              message,
-              style: const TextStyle(color: Colors.redAccent, fontSize: 13),
-            ),
-          ),
-        ],
+    if (!_busy) return const SizedBox.shrink();
+    return const Padding(
+      padding: EdgeInsets.only(bottom: 16),
+      child: StatusPill(
+        tone: StatusTone.info,
+        busy: true,
+        message: '서버에 등록하는 중…',
       ),
     );
   }

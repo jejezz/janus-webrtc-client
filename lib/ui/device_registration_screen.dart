@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 
 import '../config/janus_config.dart';
 import '../services/device_registration_service.dart';
+import 'widgets/aurora_background.dart';
+import 'widgets/glass.dart';
 
 /// 착신을 받기 위해 FCM 토큰과 SIP 내선을 rtc-relay 에 등록한다.
 ///
@@ -79,59 +81,84 @@ class _DeviceRegistrationScreenState extends State<DeviceRegistrationScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      extendBodyBehindAppBar: true,
       appBar: AppBar(title: const Text('착신용 단말 등록')),
-      body: SafeArea(
-        child: SingleChildScrollView(
-          padding: const EdgeInsets.all(24),
-          child: Form(
-            key: _formKey,
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                Text(
-                  '인터폰이 걸었을 때 이 단말을 깨우려면 FCM 토큰과 내선 번호가 '
-                  '서버에 이어져 있어야 합니다.',
-                  style: Theme.of(context).textTheme.bodySmall,
-                ),
-                const SizedBox(height: 20),
-                _field(_uuid, '단말 고유 id (uuid)', required: true),
-                _field(_email, '이메일', required: true),
-                _field(_complex, '단지(complex)', required: true),
-                _field(_address, '주소(address)', required: true),
-                _field(
-                  _token,
-                  'FCM 토큰',
-                  required: true,
-                  helper: 'firebase_messaging 연동 전까지는 직접 붙여 넣습니다',
-                  maxLines: 3,
-                ),
-                _field(
-                  _sipUser,
-                  'sip_user (내선)',
-                  helper: 'Kamailio 내선과 반드시 같아야 합니다. 비우면 기존 값 유지',
-                  validator: (v) {
-                    final value = v?.trim() ?? '';
-                    if (value.isEmpty) return null;
-                    if (!DeviceRegistrationService.isValidSipUser(value)) {
-                      return 'A-Z a-z 0-9 . _ - 만 64자까지 쓸 수 있습니다';
-                    }
-                    return null;
-                  },
-                ),
-                const SizedBox(height: 12),
-                FilledButton.icon(
-                  onPressed: _busy ? null : _submit,
-                  icon: const Icon(Icons.cloud_upload),
-                  label: Padding(
-                    padding: const EdgeInsets.symmetric(vertical: 12),
-                    child: Text(_busy ? '등록 중…' : '단말 등록'),
+      body: AuroraBackground(
+        child: SafeArea(
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.fromLTRB(20, 8, 20, 32),
+            child: Form(
+              key: _formKey,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  const StatusPill(
+                    tone: StatusTone.info,
+                    icon: Icons.info_outline,
+                    message: '인터폰이 걸었을 때 이 단말을 깨우려면 FCM 토큰과 '
+                        '내선 번호가 서버에 이어져 있어야 합니다.',
                   ),
-                ),
-                if (_result != null) ...[
-                  const SizedBox(height: 20),
-                  _buildResult(context, _result!),
+                  const SizedBox(height: 16),
+                  GlassCard(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        const SectionLabel('단말 정보',
+                            icon: Icons.smartphone_outlined),
+                        const SizedBox(height: 16),
+                        _field(_uuid, '단말 고유 id (uuid)', required: true),
+                        _field(_email, '이메일', required: true),
+                        _field(_complex, '단지(complex)', required: true),
+                        _field(_address, '주소(address)', required: true),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  GlassCard(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        const SectionLabel('착신 연결',
+                            icon: Icons.notifications_active_outlined),
+                        const SizedBox(height: 16),
+                        _field(
+                          _token,
+                          'FCM 토큰',
+                          required: true,
+                          helper: 'firebase_messaging 연동 전까지는 직접 붙여 넣습니다',
+                          maxLines: 3,
+                        ),
+                        _field(
+                          _sipUser,
+                          'sip_user (내선)',
+                          helper: 'Kamailio 내선과 반드시 같아야 합니다. 비우면 기존 값 유지',
+                          validator: (v) {
+                            final value = v?.trim() ?? '';
+                            if (value.isEmpty) return null;
+                            if (!DeviceRegistrationService.isValidSipUser(
+                              value,
+                            )) {
+                              return 'A-Z a-z 0-9 . _ - 만 64자까지 쓸 수 있습니다';
+                            }
+                            return null;
+                          },
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 24),
+                  GlowButton(
+                    label: _busy ? '등록 중…' : '단말 등록',
+                    icon: Icons.cloud_upload,
+                    busy: _busy,
+                    onPressed: _submit,
+                  ),
+                  if (_result != null) ...[
+                    const SizedBox(height: 20),
+                    _buildResult(context, _result!),
+                  ],
                 ],
-              ],
+              ),
             ),
           ),
         ),
@@ -148,7 +175,7 @@ class _DeviceRegistrationScreenState extends State<DeviceRegistrationScreen> {
     String? Function(String?)? validator,
   }) {
     return Padding(
-      padding: const EdgeInsets.only(bottom: 16),
+      padding: const EdgeInsets.only(bottom: 18),
       child: TextFormField(
         controller: controller,
         autocorrect: false,
@@ -165,25 +192,10 @@ class _DeviceRegistrationScreenState extends State<DeviceRegistrationScreen> {
   }
 
   Widget _buildResult(BuildContext context, DeviceRegistrationResult result) {
-    final color = result.ok ? Colors.greenAccent : Colors.redAccent;
-    return Container(
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: color.withValues(alpha: 0.12),
-        borderRadius: BorderRadius.circular(8),
-      ),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Icon(result.ok ? Icons.check_circle : Icons.error_outline,
-              color: color, size: 18),
-          const SizedBox(width: 8),
-          Expanded(
-            child: Text(result.message,
-                style: TextStyle(color: color, fontSize: 13)),
-          ),
-        ],
-      ),
+    return StatusPill(
+      tone: result.ok ? StatusTone.success : StatusTone.danger,
+      icon: result.ok ? Icons.check_circle : Icons.error_outline,
+      message: result.message,
     );
   }
 }

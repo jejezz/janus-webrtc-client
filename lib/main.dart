@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:permission_handler/permission_handler.dart';
 
 import 'config/tls_bootstrap.dart';
+import 'ui/theme/app_theme.dart';
 import 'ui/sip_login_screen.dart';
 
 Future<void> main() async {
@@ -30,13 +31,7 @@ class JanusClientApp extends StatelessWidget {
     return MaterialApp(
       title: 'Janus SIP Client',
       debugShowCheckedModeBanner: false,
-      theme: ThemeData(
-        colorScheme: ColorScheme.fromSeed(
-          seedColor: Colors.indigo,
-          brightness: Brightness.dark,
-        ),
-        useMaterial3: true,
-      ),
+      theme: buildAppTheme(),
       home: const SipLoginScreen(),
     );
   }
