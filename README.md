@@ -1,4 +1,4 @@
-# janus_client_app
+# Janus WebRTC Client App
 
 A new Flutter project.
 
