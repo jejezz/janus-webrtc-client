@@ -8,6 +8,12 @@
     <uses-permission android:name="android.permission.CHANGE_NETWORK_STATE" />
     <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
     <uses-permission android:name="android.permission.INTERNET" />
+    <!-- 통화 중 화면을 벗어나도 마이크가 살아 있으려면 포그라운드 서비스가 필요하다.
+         안드로이드 11+ 는 백그라운드 앱의 녹음을 조용히 침묵 처리한다. -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
+    <!-- 안드로이드 13+ 는 서비스 알림을 띄우는 데도 사용자 허락이 필요하다. -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
     <application
         android:label="Janus Client"
@@ -36,6 +42,13 @@
                 <category android:name="android.intent.category.LAUNCHER"/>
             </intent-filter>
         </activity>
+
+        <!-- 통화 중에만 뜬다. 화면을 벗어나도 마이크가 유지되게 붙잡는 역할이다. -->
+        <service
+            android:name=".CallForegroundService"
+            android:exported="false"
+            android:foregroundServiceType="microphone" />
+
         <!-- Don't delete the meta-data below.
              This is used by the Flutter tool to generate GeneratedPluginRegistrant.java -->
         <meta-data

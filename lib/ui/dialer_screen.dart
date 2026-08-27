@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_webrtc/flutter_webrtc.dart';
+import 'package:permission_handler/permission_handler.dart';
 
 import '../config/sip_config.dart';
 import '../services/sip_service.dart';
@@ -195,12 +196,25 @@ class _DialerScreenState extends State<DialerScreen> {
             },
           ),
         ])),
-        if (service.errorMessage != null)
+        if (service.errorMessage != null) ...[
           StatusPill(
             tone: StatusTone.danger,
             icon: Icons.error_outline,
             message: service.errorMessage!,
           ),
+          // 영구 거부된 권한은 앱 안에서 다시 물을 수 없다. 설정으로 보낸다.
+          if (service.needsMicPermission) ...[
+            const SizedBox(height: 12),
+            OutlinedButton.icon(
+              onPressed: openAppSettings,
+              icon: const Icon(Icons.settings_outlined, size: 18),
+              label: const Padding(
+                padding: EdgeInsets.symmetric(vertical: 12),
+                child: Text('권한 설정 열기'),
+              ),
+            ),
+          ],
+        ],
       ],
     );
   }

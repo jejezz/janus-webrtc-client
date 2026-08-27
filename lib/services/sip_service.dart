@@ -4,8 +4,10 @@ import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_webrtc/flutter_webrtc.dart';
 import 'package:janus_client/janus_client.dart';
+import 'package:permission_handler/permission_handler.dart';
 import '../config/sip_config.dart';
 import '../models/call_diagnostics.dart';
+import 'call_foreground_service.dart';
 import 'janus_connection.dart';
 
 /// 사용자에게 그대로 보여줄 메시지를 담은 내부 실패 신호.
@@ -76,6 +78,14 @@ class SipService extends ChangeNotifier {
   bool _remoteTrackArrived = false;
   Timer? _statsTimer;
   Timer? _errorTimer;
+
+  /// 마이크 권한이 막혀 통화를 시작하지 못한 상태.
+  ///
+  /// 안드로이드는 권한이 없어도 통화 자체는 붙여 준다. 대신 녹음을 조용히
+  /// 침묵 처리하므로(logcat: "App op 27 missing, silencing record") 상대에게는
+  /// 아무 소리도 가지 않는다. 사용자는 "연결은 되는데 안 들린다" 로만 겪는다.
+  bool _needsMicPermission = false;
+  bool get needsMicPermission => _needsMicPermission;
 
   /// 이번 hangup 을 실패로 보면 안 되는지.
   ///
@@ -291,6 +301,24 @@ class SipService extends ChangeNotifier {
     });
   }
 
+  /// 마이크를 쓸 수 있는지 확인한다. 없으면 통화를 시작하지 않는다.
+  ///
+  /// 한 번 영구 거부된 뒤에는 request() 가 대화상자를 띄우지 못하므로, 설정으로
+  /// 보내는 것 말고는 방법이 없다.
+  Future<bool> _ensureMicrophone() async {
+    var status = await Permission.microphone.status;
+    if (status.isDenied) status = await Permission.microphone.request();
+    final granted = status.isGranted || status.isLimited;
+    _needsMicPermission = !granted;
+    if (!granted) {
+      _fail(
+        '마이크 권한이 없습니다.\n'
+        '이대로 통화하면 상대에게 소리가 가지 않아 시작하지 않습니다.',
+      );
+    }
+    return granted;
+  }
+
   /// 통화가 끊겼을 때. 연결되기 전에 끊겼다면 그건 실패이므로 사유를 보여 준다.
   Future<void> _handleHangup(Object? code, Object? reason) async {
     final expected = _expectedHangup || _callState == CallState.active;
@@ -446,10 +474,14 @@ class SipService extends ChangeNotifier {
     }
     if (hasCall) return;
     _clearError();
+    if (!await _ensureMicrophone()) return;
     _expectedHangup = false;
 
     try {
       _peer = SipConfig.displayOf(SipConfig.toSipUri(target));
+      // 발신을 누른 순간부터 켠다. 상대가 받기 전에 홈으로 나가도 마이크가
+      // 살아 있어야 연결되자마자 소리가 간다.
+      await CallForegroundService.start(peer: _peer);
       _setCall(CallState.outgoing);
 
       // 이전 통화가 남긴 PeerConnection 위에서 재협상하지 않도록 새로 세운다.
@@ -482,9 +514,11 @@ class SipService extends ChangeNotifier {
     final offer = _pendingOffer;
     if (sip == null || offer == null) return;
     _clearError();
+    if (!await _ensureMicrophone()) return;
     _expectedHangup = false;
 
     try {
+      await CallForegroundService.start(peer: _peer);
       // 착신도 마찬가지다. 직전 통화의 PC 를 재사용하면 answer 가 어긋난다.
       await _freshPeerConnection(sip);
 
@@ -570,6 +604,7 @@ class SipService extends ChangeNotifier {
   }
 
   Future<void> _teardownCall() async {
+    await CallForegroundService.stop();
     _stopStatsPolling();
     _diagnostics = const CallDiagnostics();
     _iceState = null;

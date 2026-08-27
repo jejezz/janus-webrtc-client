@@ -18,8 +18,11 @@ Future<void> main() async {
 Future<void> _ensureCallPermissions() async {
   try {
     await Permission.microphone.request();
+    // 통화 중 포그라운드 서비스 알림을 띄우려면 필요하다(안드로이드 13+).
+    // 거절해도 서비스 자체는 뜨므로 통화는 된다 — 알림만 안 보인다.
+    await Permission.notification.request();
   } catch (e) {
-    debugPrint('마이크 권한 요청 실패: $e');
+    debugPrint('권한 요청 실패: $e');
   }
 }
 

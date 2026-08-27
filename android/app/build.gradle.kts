@@ -7,7 +7,9 @@ plugins {
 
 android {
     namespace = "com.europa.janus_client_app"
-    compileSdk = flutter.compileSdkVersion
+    // flutter_secure_storage 가 37 을 요구한다. flutter.compileSdkVersion(36) 을
+    // 그대로 쓰면 매 빌드마다 경고가 나온다. 상위 호환이라 올려도 안전하다.
+    compileSdk = 37
     ndkVersion = flutter.ndkVersion
 
     compileOptions {
