@@ -116,6 +116,21 @@ class JanusConnection {
     return plugin;
   }
 
+  /// 시그널링 전송이 아직 살아 있는지.
+  ///
+  /// WebSocket 은 백그라운드 전환이나 네트워크 변경으로 조용히 끊긴다. 그때
+  /// `JanusPlugin.send()` 는 삼킨 예외 대신 null 을 돌려주고, 그 null 이
+  /// `JanusEvent.fromJson` 으로 들어가 엉뚱한 NoSuchMethodError 로 둔갑한다.
+  /// 보내기 전에 여기서 먼저 걸러야 사용자에게 제대로 된 이유를 줄 수 있다.
+  bool get isAlive {
+    final ws = transport;
+    if (ws is WebSocketJanusTransport) return ws.isConnected;
+    return true;   // REST 는 연결 개념이 없다.
+  }
+
+  /// janus_client 가 삼킨 마지막 오류.
+  String? get lastSwallowedError => _log.lastError;
+
   void dispose() => session.dispose();
 }
 
@@ -125,12 +140,16 @@ class JanusConnection {
 /// 출력까지 여기서 맡는다.
 class _SwallowedErrorLog {
   _SwallowedErrorLog() : logger = Logger.detached('JanusClient') {
-    logger.level = kDebugMode ? Level.INFO : Level.WARNING;
+    // JanusPlugin.send() 는 삼킨 예외를 FINE 으로 흘린다. WARNING 으로 막아 두면
+    // 정작 알아야 할 "WebSocket is not connected" 를 놓친다.
+    logger.level = Level.FINE;
     logger.onRecord.listen((record) {
-      if (record.level >= Level.SEVERE) {
+      if (record.level >= Level.FINE) {
         lastError = record.message.toString();
       }
-      debugPrint('[janus] ${record.level.name}: ${record.message}');
+      if (kDebugMode || record.level >= Level.WARNING) {
+        debugPrint('[janus] ${record.level.name}: ${record.message}');
+      }
     });
   }
 

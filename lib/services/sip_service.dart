@@ -75,6 +75,15 @@ class SipService extends ChangeNotifier {
   RTCIceConnectionState? _iceState;
   bool _remoteTrackArrived = false;
   Timer? _statsTimer;
+  Timer? _errorTimer;
+
+  /// 이번 hangup 을 실패로 보면 안 되는지.
+  ///
+  /// 통화가 붙었거나 사용자가 직접 끊거나 거절한 경우다. 내가 끊으면
+  /// `_teardownCall()` 이 먼저 돌아 통화 상태가 지워지고 **그 뒤에** Janus 의
+  /// hangup 이벤트가 도착하므로, 통화 상태만 보면 정상 종료를 실패로 오인한다.
+  /// 그래서 통화 밖에서도 값이 유지되는 별도 표시가 필요하다.
+  bool _expectedHangup = false;
 
   SipRegistrationState get registrationState => _registrationState;
   CallState get callState => _callState;
@@ -217,6 +226,12 @@ class SipService extends ChangeNotifier {
     // registration_failed 와 플러그인 오류는 타입 이벤트로 오지 않는다.
     // 원본 메시지에서 직접 읽지 않으면 등록 실패가 조용히 묻힌다.
     _track<EventMessage>(sip.messages, (payload) async {
+      // 무엇이 실제로 오갔는지 남긴다. Janus 가 코드도 사유도 없이 끊을 때는
+      // 원본 이벤트 말고는 단서가 없다.
+      if (kDebugMode) {
+        debugPrint('[sip] ${jsonEncode(payload.event)}'
+            '${payload.jsep == null ? '' : ' (+jsep ${payload.jsep!.type})'}');
+      }
       final data = JanusEvent.fromJson(payload.event).plugindata?.data;
       if (data is! Map) return;
 
@@ -226,6 +241,12 @@ class SipService extends ChangeNotifier {
         return;
       }
       final result = data['result'];
+      if (result is Map && result['event'] == 'hangup') {
+        // 패키지는 SipHangupEvent.fromJson(data) 로 만드는데 code/reason 은
+        // data['result'] 안에 있어 늘 null 이 된다. 여기서 직접 읽는다.
+        await _handleHangup(result['code'], result['reason']);
+        return;
+      }
       if (result is Map && result['event'] == 'registration_failed') {
         _failRegistration(
           'SIP 등록이 거절되었습니다 (${result['code'] ?? '?'} ${result['reason'] ?? ''}).\n'
@@ -258,16 +279,48 @@ class SipService extends ChangeNotifier {
         await _applyAnswer(sip, event.jsep);
         _setCall(CallState.ringing);
       } else if (data is SipAcceptedEvent) {
+        _clearError();
         await _applyAnswer(sip, event.jsep);
         _connectedAt = DateTime.now();
+        _expectedHangup = true;
         _startStatsPolling();
         _setCall(CallState.active);
-      } else if (data is SipHangupEvent) {
-        await _teardownCall();
       } else if (data is SipMissedCallEvent) {
         await _teardownCall();
       }
     });
+  }
+
+  /// 통화가 끊겼을 때. 연결되기 전에 끊겼다면 그건 실패이므로 사유를 보여 준다.
+  Future<void> _handleHangup(Object? code, Object? reason) async {
+    final expected = _expectedHangup || _callState == CallState.active;
+    debugPrint('SIP hangup: code=$code reason=$reason expected=$expected');
+    await _teardownCall();
+    if (expected) return;   // 정상적으로 통화하다 끝났거나 내가 끊은 것이다
+    _fail(_hangupMessage(code, reason));
+  }
+
+  String _hangupMessage(Object? code, Object? reason) {
+    final hint = switch (code) {
+      486 => '상대가 통화 중입니다.\n앞선 통화가 상대 단말에 남아 있을 수 있습니다.',
+      404 => '상대 내선을 찾을 수 없습니다.',
+      480 => '상대가 지금 받을 수 없는 상태입니다.',
+      408 => '상대가 응답하지 않았습니다.',
+      403 => '서버가 발신을 거절했습니다.',
+      488 => '미디어 협상에 실패했습니다. 코덱(G.711) 설정을 확인하세요.',
+      _ => null,
+    };
+    final detail = [
+      if (code != null) '$code',
+      if (reason != null && '$reason'.trim().isNotEmpty) '$reason'.trim(),
+    ].join(' ');
+
+    if (hint != null) {
+      return detail.isEmpty ? hint : '$hint ($detail)';
+    }
+    return detail.isEmpty
+        ? '통화가 연결되지 않았습니다.'
+        : '통화가 연결되지 않았습니다 ($detail).';
   }
 
   /// 원격 answer 를 붙인다.
@@ -392,6 +445,8 @@ class SipService extends ChangeNotifier {
       return;
     }
     if (hasCall) return;
+    _clearError();
+    _expectedHangup = false;
 
     try {
       _peer = SipConfig.displayOf(SipConfig.toSipUri(target));
@@ -409,8 +464,13 @@ class SipService extends ChangeNotifier {
       // PCMU/PCMA 가 남아 있어야 인터폰과 소리가 통한다.
       await sip.call(SipConfig.toSipUri(target));
     } catch (e) {
-      _fail('발신에 실패했습니다: $e');
+      final reason = _describeSendFailure('발신에 실패했습니다', e);
       await _teardownCall();
+      if (_linkIsDown(e)) {
+        _dropLink();   // 등록 화면으로 돌려보내 다시 붙게 한다
+      } else {
+        _fail(reason);
+      }
     }
   }
 
@@ -421,6 +481,8 @@ class SipService extends ChangeNotifier {
     final sip = _sip;
     final offer = _pendingOffer;
     if (sip == null || offer == null) return;
+    _clearError();
+    _expectedHangup = false;
 
     try {
       // 착신도 마찬가지다. 직전 통화의 PC 를 재사용하면 answer 가 어긋난다.
@@ -437,16 +499,23 @@ class SipService extends ChangeNotifier {
       await sip.accept();
 
       _connectedAt = DateTime.now();
+      _expectedHangup = true;
       _startStatsPolling();
       _setCall(CallState.active);
     } catch (e) {
-      _fail('통화 수락에 실패했습니다: $e');
+      final reason = _describeSendFailure('통화 수락에 실패했습니다', e);
       await _teardownCall();
+      if (_linkIsDown(e)) {
+        _dropLink();
+      } else {
+        _fail(reason);
+      }
     }
   }
 
   /// 착신을 거절한다. 기본 486 Busy Here.
   Future<void> declineCall({int code = 486}) async {
+    _expectedHangup = true;
     try {
       await _sip?.decline(code: code);
     } catch (e) {
@@ -458,12 +527,24 @@ class SipService extends ChangeNotifier {
   // ------------------------------------------------------------------- 통화
 
   Future<void> hangup() async {
+    _expectedHangup = true;
+    Object? failure;
     try {
       await _sip?.hangup();
     } catch (e) {
+      // BYE 가 나가지 못하면 상대 단말은 계속 통화 중으로 남는다. 그러면
+      // 다음 발신이 전부 486 으로 거절된다 — 조용히 넘기면 안 되는 실패다.
       debugPrint('hangup 실패: $e');
+      failure = e;
     }
     await _teardownCall();
+    if (failure != null) {
+      _fail(
+        '통화 종료를 서버에 전달하지 못했습니다.\n'
+        '상대 단말이 통화 중으로 남아 다음 발신이 거절될 수 있습니다.\n'
+        '${_describeSendFailure('원인', failure)}',
+      );
+    }
   }
 
   void toggleMic() {
@@ -514,6 +595,8 @@ class SipService extends ChangeNotifier {
 
   /// 등록을 해제하고 세션을 닫는다.
   Future<void> disconnect() async {
+    _errorTimer?.cancel();
+    _errorTimer = null;
     _stopStatsPolling();
     for (final subscription in _subscriptions) {
       await subscription.cancel();
@@ -564,6 +647,45 @@ class SipService extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// 소켓이 끊긴 것을 확인했을 때. 세션과 핸들도 서버에서 이미 무효라
+  /// 재연결만으로는 못 살리고 재등록해야 한다.
+  ///
+  /// 죽은 트랜스포트를 그대로 두면 자동 재연결 루프가 계속 돌면서 처리되지 않는
+  /// 예외를 던지고, 재등록 때마다 하나씩 쌓인다. 여기서 확실히 닫는다.
+  void _dropLink() {
+    _stopStatsPolling();
+    _callState = CallState.none;
+    _errorMessage = '서버와의 연결이 끊어졌습니다.\n다시 등록해야 통화할 수 있습니다.';
+    _registrationState = SipRegistrationState.failed;
+    notifyListeners();
+    unawaited(_abandon());
+  }
+
+  /// janus_client 가 삼킨 전송 오류를 사람이 읽을 수 있는 문장으로 바꾼다.
+  ///
+  /// `JanusPlugin.send()` 는 예외를 로그로만 흘리고 null 을 돌려주는데, 그 null 이
+  /// `JanusEvent.fromJson` 으로 들어가 `NoSuchMethodError: []("janus")` 로
+  /// 둔갑한다. 진짜 이유는 로거가 잡아 둔 쪽에 있다.
+  String _describeSendFailure(String prefix, Object error) {
+    final swallowed = _connection?.lastSwallowedError;
+    if (error is NoSuchMethodError && swallowed != null) {
+      return '$prefix: $swallowed';
+    }
+    return '$prefix: $error';
+  }
+
+  /// 소켓이 죽어서 실패한 것인지.
+  ///
+  /// 미리 상태 플래그를 보고 막지는 않는다. WebRTC 가 ICE 때문에 네트워크를
+  /// 새로 요청하는 순간 플래그가 잠깐 내려가는데, 그걸로 막으면 멀쩡한 통화가
+  /// 시작도 못 한다. 실제로 보내 보고 실패한 뒤에만 판단한다.
+  bool _linkIsDown(Object error) {
+    final swallowed = _connection?.lastSwallowedError;
+    return error is NoSuchMethodError &&
+        swallowed != null &&
+        swallowed.contains('WebSocket is not connected');
+  }
+
   void _setCall(CallState state) {
     if (_callState == state) return;
     _callState = state;
@@ -573,6 +695,34 @@ class SipService extends ChangeNotifier {
   void _fail(String message) {
     _errorMessage = message;
     if (!isRegistered) _registrationState = SipRegistrationState.failed;
+    _scheduleErrorClear();
+    notifyListeners();
+  }
+
+  /// 통화 단계의 실패 문구는 잠시 뒤 스스로 사라진다.
+  ///
+  /// 등록 실패는 사용자가 설정을 고쳐야 풀리므로 남겨 둔다. 반면 발신 실패는
+  /// 다음 통화가 멀쩡히 붙어도 화면에 계속 붙어 있으면 거짓말이 된다.
+  static const Duration _errorLifetime = Duration(seconds: 8);
+
+  void _scheduleErrorClear() {
+    _errorTimer?.cancel();
+    _errorTimer = null;
+    if (!isRegistered) return;
+    _errorTimer = Timer(_errorLifetime, () {
+      _errorTimer = null;
+      if (_errorMessage == null) return;
+      _errorMessage = null;
+      notifyListeners();
+    });
+  }
+
+  /// 새 시도를 시작할 때 지난 실패를 지운다.
+  void _clearError() {
+    _errorTimer?.cancel();
+    _errorTimer = null;
+    if (_errorMessage == null) return;
+    _errorMessage = null;
     notifyListeners();
   }
 

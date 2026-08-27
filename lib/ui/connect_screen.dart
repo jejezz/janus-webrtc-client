@@ -70,15 +70,20 @@ class _ConnectScreenState extends State<ConnectScreen> {
     if (!_service.isRegistered) return;
 
     _navigated = true;
-    await Navigator.of(context).push(
-      MaterialPageRoute<void>(builder: (_) => DialerScreen(service: _service)),
+    final exit = await Navigator.of(context).push<DialerExit>(
+      MaterialPageRoute<DialerExit>(
+        builder: (_) => DialerScreen(service: _service),
+      ),
     );
     if (!mounted) return;
-    // 다이얼러에서 돌아왔다는 것은 사용자가 등록을 해제했다는 뜻이다.
-    setState(() {
-      _navigated = false;
-      _manual = true;
-    });
+    setState(() => _navigated = false);
+
+    if (exit == DialerExit.connectionLost) {
+      // 사용자가 끊은 게 아니라 시그널링이 죽은 것이다. 조용히 다시 붙는다.
+      _register();
+      return;
+    }
+    setState(() => _manual = true);
   }
 
   Future<void> _register() async {
@@ -117,9 +122,16 @@ class _ConnectScreenState extends State<ConnectScreen> {
         child: SafeArea(
           child: ListenableBuilder(
             listenable: _service,
-            builder: (context, _) => Padding(
-              padding: const EdgeInsets.fromLTRB(24, 8, 24, 32),
-              child: Column(
+            builder: (context, _) => LayoutBuilder(
+              builder: (context, constraints) => SingleChildScrollView(
+                padding: const EdgeInsets.fromLTRB(24, 8, 24, 32),
+                child: ConstrainedBox(
+                  constraints:
+                      BoxConstraints(minHeight: constraints.maxHeight - 40),
+                  // Spacer 는 높이가 확정돼야 동작한다. 스크롤 안에서는
+                  // IntrinsicHeight 가 그 높이를 잡아 준다.
+                  child: IntrinsicHeight(
+                    child: Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
                   const Spacer(flex: 2),
@@ -149,6 +161,9 @@ class _ConnectScreenState extends State<ConnectScreen> {
                   const Spacer(flex: 3),
                   ..._buildStatus(context),
                 ],
+                    ),
+                  ),
+                ),
               ),
             ),
           ),

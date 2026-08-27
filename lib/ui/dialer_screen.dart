@@ -12,6 +12,15 @@ import 'widgets/glass.dart';
 import 'widgets/janus_mark.dart';
 import 'widgets/pulse_avatar.dart';
 
+/// 다이얼러를 벗어난 이유. 호출한 쪽이 재등록할지 말지 가른다.
+enum DialerExit {
+  /// 사용자가 직접 등록을 해제했다.
+  userEnded,
+
+  /// 시그널링이 끊겨 등록이 풀렸다. 다시 등록해야 한다.
+  connectionLost,
+}
+
 /// 등록이 끝난 뒤의 화면. 발신과 착신 응답을 모두 여기서 처리한다.
 class DialerScreen extends StatefulWidget {
   const DialerScreen({super.key, required this.service});
@@ -29,9 +38,13 @@ class _DialerScreenState extends State<DialerScreen> {
   /// 통화 시간 표시를 1초마다 갱신한다.
   Timer? _ticker;
 
+  /// 중복 pop 을 막는다.
+  bool _leaving = false;
+
   @override
   void initState() {
     super.initState();
+    widget.service.addListener(_onServiceChanged);
     _ticker = Timer.periodic(const Duration(seconds: 1), (_) {
       if (mounted && widget.service.callState == CallState.active) {
         setState(() {});
@@ -41,15 +54,27 @@ class _DialerScreenState extends State<DialerScreen> {
 
   @override
   void dispose() {
+    widget.service.removeListener(_onServiceChanged);
     _ticker?.cancel();
     _callee.dispose();
     super.dispose();
   }
 
+  /// 등록이 풀리면 이 화면은 아무것도 할 수 없다. 등록 화면으로 돌려보내
+  /// 다시 붙게 한다.
+  void _onServiceChanged() {
+    if (!mounted || _leaving) return;
+    if (widget.service.registrationState != SipRegistrationState.failed) return;
+    _leaving = true;
+    Navigator.of(context).pop(DialerExit.connectionLost);
+  }
+
   Future<void> _hangUpAndLeave() async {
+    if (_leaving) return;
+    _leaving = true;
     if (widget.service.hasCall) await widget.service.hangup();
     await widget.service.disconnect();
-    if (mounted) Navigator.of(context).pop();
+    if (mounted) Navigator.of(context).pop(DialerExit.userEnded);
   }
 
   @override
@@ -123,10 +148,10 @@ class _DialerScreenState extends State<DialerScreen> {
               ? '내선 ${service.extension} 등록됨 · ${SipConfig.domain}'
               : 'SIP 등록 대기 중',
         ),
-        const Spacer(),
-        const Center(child: JanusMark(width: 150)),
-        const SizedBox(height: 28),
-        GlassCard(
+        Expanded(child: _centered([
+          const Center(child: JanusMark(width: 150)),
+          const SizedBox(height: 28),
+          GlassCard(
           padding: const EdgeInsets.fromLTRB(20, 20, 20, 24),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -157,19 +182,19 @@ class _DialerScreenState extends State<DialerScreen> {
             ],
           ),
         ),
-        const SizedBox(height: 24),
-        GlowButton(
-          label: '전화 걸기',
-          icon: Icons.call,
-          gradient: AppPalette.liveGradient,
-          onPressed: () {
-            final target = _callee.text.trim();
-            if (target.isEmpty) return;
-            FocusScope.of(context).unfocus();
-            widget.service.call(target);
-          },
-        ),
-        const Spacer(),
+          const SizedBox(height: 24),
+          GlowButton(
+            label: '전화 걸기',
+            icon: Icons.call,
+            gradient: AppPalette.liveGradient,
+            onPressed: () {
+              final target = _callee.text.trim();
+              if (target.isEmpty) return;
+              FocusScope.of(context).unfocus();
+              widget.service.call(target);
+            },
+          ),
+        ])),
         if (service.errorMessage != null)
           StatusPill(
             tone: StatusTone.danger,
@@ -280,31 +305,34 @@ class _DialerScreenState extends State<DialerScreen> {
   }) {
     return Column(
       children: [
-        const Spacer(),
-        PulseAvatar(color: accent, animate: !connected),
-        const SizedBox(height: 12),
-        Text(
-          title,
-          style: const TextStyle(
-            fontSize: 30,
-            fontWeight: FontWeight.w700,
-            letterSpacing: 0.5,
+        // 통화가 붙으면 진단 카드에 줄이 늘어난다. Spacer 로만 짜면 그때
+        // 화면을 넘치므로, 넘칠 때만 스크롤되게 두고 버튼은 아래에 고정한다.
+        Expanded(child: _centered([
+          PulseAvatar(color: accent, animate: !connected),
+          const SizedBox(height: 12),
+          Text(
+            title,
+            style: const TextStyle(
+              fontSize: 30,
+              fontWeight: FontWeight.w700,
+              letterSpacing: 0.5,
+            ),
+            textAlign: TextAlign.center,
           ),
-          textAlign: TextAlign.center,
-        ),
-        const SizedBox(height: 8),
-        Text(
-          subtitle,
-          style: TextStyle(
-            fontSize: connected ? 20 : 15,
-            color: connected ? accent : Colors.white60,
-            fontWeight: connected ? FontWeight.w600 : FontWeight.w400,
-            letterSpacing: connected ? 1.5 : 0.2,
+          const SizedBox(height: 8),
+          Text(
+            subtitle,
+            style: TextStyle(
+              fontSize: connected ? 20 : 15,
+              color: connected ? accent : Colors.white60,
+              fontWeight: connected ? FontWeight.w600 : FontWeight.w400,
+              letterSpacing: connected ? 1.5 : 0.2,
+            ),
           ),
-        ),
-        const Spacer(),
-        _buildDiagnostics(context),
-        const SizedBox(height: 24),
+          const SizedBox(height: 28),
+          _buildDiagnostics(context),
+        ])),
+        const SizedBox(height: 20),
         Row(
           mainAxisAlignment: actions.length == 1
               ? MainAxisAlignment.center
@@ -313,6 +341,26 @@ class _DialerScreenState extends State<DialerScreen> {
         ),
         const SizedBox(height: 16),
       ],
+    );
+  }
+
+  /// 자리가 남으면 가운데 정렬, 모자라면 스크롤. 어느 기기에서도 넘치지 않는다.
+  Widget _centered(List<Widget> children) {
+    return LayoutBuilder(
+      builder: (context, constraints) => SingleChildScrollView(
+        child: ConstrainedBox(
+          constraints: BoxConstraints(minHeight: constraints.maxHeight),
+          // 스크롤 안에서는 높이가 무한이라 가운데 정렬이 먹지 않는다.
+          // IntrinsicHeight 로 실제 높이를 확정해 줘야 한다.
+          child: IntrinsicHeight(
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: children,
+            ),
+          ),
+        ),
+      ),
     );
   }
 
