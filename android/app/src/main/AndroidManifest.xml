@@ -14,6 +14,8 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
     <!-- 안드로이드 13+ 는 서비스 알림을 띄우는 데도 사용자 허락이 필요하다. -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- 착신 푸시가 왔을 때 화면이 꺼져 있어도 통화 화면을 띄운다. -->
+    <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT" />
 
     <application
         android:label="Janus Client"

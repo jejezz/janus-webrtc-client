@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:permission_handler/permission_handler.dart';
 
 import 'config/tls_bootstrap.dart';
+import 'services/push_service.dart';
 import 'ui/theme/app_theme.dart';
 import 'ui/connect_screen.dart';
 
@@ -12,6 +13,8 @@ Future<void> main() async {
   // 착신은 60초 안에 등록까지 끝내야 한다. 통화 시작 시점에 권한을 물으면
   // 그 사이에 시간을 까먹으므로 첫 실행 때 미리 받아 둔다.
   await _ensureCallPermissions();
+  // 착신 푸시. 설정이 없으면 조용히 꺼진 채로 두고 발신은 그대로 쓴다.
+  await PushService.initialize();
   runApp(const JanusClientApp());
 }
 

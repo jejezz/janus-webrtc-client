@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../config/janus_config.dart';
 import '../services/device_registration_service.dart';
+import '../services/push_service.dart';
 import 'widgets/aurora_background.dart';
 import 'widgets/glass.dart';
 
@@ -9,9 +10,8 @@ import 'widgets/glass.dart';
 ///
 /// 이걸 하지 않으면 인터폰이 걸어도 깨울 단말을 찾지 못한다.
 ///
-/// FCM 토큰 자동 조회는 아직 붙어 있지 않다. `firebase_messaging` 과 Firebase
-/// 프로젝트의 `google-services.json` 이 있어야 해서, 지금은 토큰을 직접 넣어
-/// 서버 연동만 먼저 검증할 수 있게 해 두었다.
+/// FCM 토큰은 앱이 알아서 채운다. 다만 `google-services.json` 이 없으면 토큰을
+/// 얻을 수 없으므로, 그때는 비워 두고 직접 붙여 넣을 수 있게 남겨 둔다.
 class DeviceRegistrationScreen extends StatefulWidget {
   const DeviceRegistrationScreen({super.key, this.defaultSipUser});
 
@@ -35,6 +35,28 @@ class _DeviceRegistrationScreenState extends State<DeviceRegistrationScreen> {
 
   bool _busy = false;
   DeviceRegistrationResult? _result;
+
+  /// FCM 을 쓸 수 없어 토큰을 못 채운 상태.
+  bool _tokenUnavailable = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _fillToken();
+  }
+
+  /// 이 단말의 FCM 토큰을 채워 둔다. 사용자가 어디서 복사해 올 값이 아니다.
+  Future<void> _fillToken() async {
+    final token = await PushService.token();
+    if (!mounted) return;
+    setState(() {
+      if (token != null) {
+        _token.text = token;
+      } else {
+        _tokenUnavailable = true;
+      }
+    });
+  }
 
   @override
   void dispose() {
@@ -125,7 +147,10 @@ class _DeviceRegistrationScreenState extends State<DeviceRegistrationScreen> {
                           _token,
                           'FCM 토큰',
                           required: true,
-                          helper: 'firebase_messaging 연동 전까지는 직접 붙여 넣습니다',
+                          helper: _tokenUnavailable
+                              ? 'google-services.json 이 없어 토큰을 얻지 못했습니다. '
+                                  '직접 붙여 넣으세요'
+                              : '이 단말의 토큰을 자동으로 채웁니다',
                           maxLines: 3,
                         ),
                         _field(

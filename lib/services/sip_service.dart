@@ -9,6 +9,7 @@ import '../config/sip_config.dart';
 import '../models/call_diagnostics.dart';
 import 'call_foreground_service.dart';
 import 'janus_connection.dart';
+import 'push_service.dart';
 
 /// 사용자에게 그대로 보여줄 메시지를 담은 내부 실패 신호.
 class _SipFailure implements Exception {
@@ -275,6 +276,9 @@ class SipService extends ChangeNotifier {
       } else if (data is SipUnRegisteredEvent) {
         _setRegistration(SipRegistrationState.idle);
       } else if (data is SipIncomingCallEvent) {
+        // 여기까지 왔다는 것은 앱이 깨어나 등록까지 마쳤다는 뜻이다.
+        // 깨우기용 알림은 역할을 다했으므로 치운다.
+        unawaited(PushService.dismissIncomingCall());
         // offer 는 사용자가 받기를 누를 때 소비한다.
         _pendingOffer = event.jsep;
         _peer = SipConfig.displayOf(data.result?.username);

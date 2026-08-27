@@ -43,6 +43,9 @@ dependencies:
   # 통화 시작 전에 마이크 권한을 미리 받아 둔다 (착신 60초 제한 때문).
   permission_handler: ^11.3.1
   flutter_secure_storage: ^11.0.0
+  firebase_core: ^4.14.0
+  firebase_messaging: ^16.6.0
+  flutter_local_notifications: ^22.3.0
 
 dev_dependencies:
   flutter_test:
