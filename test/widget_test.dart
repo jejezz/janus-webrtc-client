@@ -1,6 +1,7 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:janus_client_app/config/sip_config.dart';
-import 'package:janus_client_app/services/device_registration_service.dart';
+import 'package:janus_client_app/models/sip_account.dart';
+import 'package:janus_client_app/services/credential_store.dart';
 
 void main() {
   group('SipConfig', () {
@@ -34,13 +35,56 @@ void main() {
     });
   });
 
-  group('DeviceRegistrationService', () {
-    test('sip_user 는 허용 문자 64자까지만 받는다', () {
-      expect(DeviceRegistrationService.isValidSipUser('1001'), isTrue);
-      expect(DeviceRegistrationService.isValidSipUser('a.b_c-1'), isTrue);
-      expect(DeviceRegistrationService.isValidSipUser(''), isFalse);
-      expect(DeviceRegistrationService.isValidSipUser('has space'), isFalse);
-      expect(DeviceRegistrationService.isValidSipUser('a' * 65), isFalse);
+  group('SipAccount', () {
+    test('등록 응답의 sip 를 읽는다', () {
+      final account = SipAccount.fromJson({
+        'user': '0101080501',
+        'domain': 'pluto.org',
+        'password': '9e807d',
+      });
+      expect(account, isNotNull);
+      expect(account!.uri, 'sip:0101080501@pluto.org');
+    });
+
+    test('sip 가 없거나 비면 null 이다 — 번호가 배정되지 않은 세대다', () {
+      expect(SipAccount.fromJson(null), isNull);
+      expect(SipAccount.fromJson(const {}), isNull);
+      expect(
+        SipAccount.fromJson(const {'user': '0101080501', 'domain': 'pluto.org'}),
+        isNull,
+      );
+    });
+  });
+
+  group('DeviceProfile', () {
+    test('동/호를 서버가 받는 유일한 형태로 조립한다', () {
+      const profile = DeviceProfile(
+        uuid: 'u',
+        email: 'a@b.c',
+        complexId: 'c',
+        complexName: '단지',
+        complexHost: 'example.test',
+        building: '101',
+        unit: '805',
+        apiSecret: 's',
+      );
+      expect(profile.address, '101B805U');
+      expect(profile.janusUrl, 'wss://example.test/janus-ws');
+    });
+
+    test('SIP 자격은 완결 조건에 들어가지 않는다 — 등록해 봐야 받는 값이다', () {
+      const profile = DeviceProfile(
+        uuid: 'u',
+        email: 'a@b.c',
+        complexId: 'c',
+        complexName: '단지',
+        complexHost: 'example.test',
+        building: '101',
+        unit: '805',
+        apiSecret: 's',
+      );
+      expect(profile.sip, isNull);
+      expect(profile.isComplete, isTrue);
     });
   });
 }

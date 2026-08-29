@@ -93,13 +93,11 @@ class _DialerScreenState extends State<DialerScreen> {
           title: const Text('인터폰 통화'),
           actions: [
             IconButton(
-              tooltip: '착신용 단말 등록',
+              tooltip: '단말 등록 상태',
               icon: const Icon(Icons.notifications_active_outlined),
               onPressed: () => Navigator.of(context).push(
                 MaterialPageRoute<void>(
-                  builder: (_) => DeviceRegistrationScreen(
-                    defaultSipUser: service.extension,
-                  ),
+                  builder: (_) => const DeviceRegistrationScreen(),
                 ),
               ),
             ),

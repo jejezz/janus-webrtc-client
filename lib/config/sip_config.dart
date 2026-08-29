@@ -43,12 +43,15 @@ class SipConfig {
   };
 
   /// 내선 번호나 전체 URI 를 받아 SIP URI 로 정규화한다.
-  static String toSipUri(String value) {
+  ///
+  /// [domain] 은 등록된 계정의 도메인을 넘긴다. 서버가 배정한 자격에 도메인이
+  /// 함께 오므로 그쪽이 맞다. 없으면 기본값으로 떨어진다.
+  static String toSipUri(String value, {String? domain}) {
     final trimmed = value.trim();
     if (trimmed.startsWith('sip:') || trimmed.startsWith('sips:')) {
       return trimmed;
     }
-    return 'sip:$trimmed@$domain';
+    return 'sip:$trimmed@${domain?.trim().isNotEmpty == true ? domain!.trim() : SipConfig.domain}';
   }
 
   /// SIP URI 에서 사람이 읽을 부분(내선/번호)만 뽑는다.
@@ -63,16 +66,24 @@ class SipConfig {
   ///
   /// 시그널링과 같은 오리진에 있다. `wss://host:port/janus-ws` 에서
   /// `https://host:port/rtc-relay/register/mobile` 을 만든다.
+  /// nginx 앞단의 경로 접두사는 배포마다 다르다. 이 저장소의 서버는
+  /// `/rtc-relay`, 마이그레이션 문서의 예시는 `/iot`, 포트에 직접 붙으면
+  /// 접두사가 없다. 값만 바꿔 맞춘다.
+  static const String relayPath = String.fromEnvironment(
+    'RTC_RELAY_PATH',
+    defaultValue: '/rtc-relay/register/mobile',
+  );
+
   static String deviceRegistrationUrl({String? signalingUrl}) {
     const override = String.fromEnvironment('RTC_RELAY_URL');
     if (override.isNotEmpty) return override;
 
     final uri = Uri.tryParse(signalingUrl ?? JanusConfig.defaultServerUrl);
     if (uri == null || uri.host.isEmpty) {
-      return 'https://jejezzhome.iptime.org:28443/rtc-relay/register/mobile';
+      return 'https://jejezzhome.iptime.org:28443$relayPath';
     }
     final scheme = uri.isScheme('ws') || uri.isScheme('http') ? 'http' : 'https';
     final port = uri.hasPort ? ':${uri.port}' : '';
-    return '$scheme://${uri.host}$port/rtc-relay/register/mobile';
+    return '$scheme://${uri.host}$port$relayPath';
   }
 }

@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 
-import '../config/sip_config.dart';
+import '../models/sip_account.dart';
 import '../services/credential_store.dart';
+import '../services/device_registration_service.dart';
+import '../services/push_service.dart';
 import '../services/sip_service.dart';
 import 'dialer_screen.dart';
 import 'settings_screen.dart';
@@ -10,10 +12,17 @@ import 'widgets/aurora_background.dart';
 import 'widgets/glass.dart';
 import 'widgets/janus_mark.dart';
 
-/// 앱의 첫 화면. 저장된 접속 정보로 등록까지 밀고 간다.
+/// 앱의 첫 화면. 저장된 단지·세대로 자격을 받아 등록까지 밀고 간다.
 ///
-/// 저장된 값이 있으면 사용자 개입 없이 바로 등록하고, 없으면 설정 화면을 연다.
-/// 등록에 실패하면 원인과 함께 설정으로 갈 수 있는 길을 보여 준다.
+/// 순서가 정해져 있다 (client-migration.md).
+///
+/// ```
+/// /register/mobile  →  sip{user,domain,password}  →  Janus register
+/// ```
+///
+/// 앱이 내선 번호를 정하지 않는다. 서버가 동/호에서 계산해 배정한 값을 받아 쓸
+/// 뿐이고, 비밀번호는 자리를 물려받은 단말이 생기면 새로 발급되므로 401 을
+/// 만나면 한 번 더 받아서 다시 등록한다.
 class ConnectScreen extends StatefulWidget {
   const ConnectScreen({super.key});
 
@@ -24,50 +33,148 @@ class ConnectScreen extends StatefulWidget {
 class _ConnectScreenState extends State<ConnectScreen> {
   final SipService _service = SipService();
   final CredentialStore _store = const CredentialStore();
+  final DeviceRegistrationService _enrollment = DeviceRegistrationService();
 
-  SipCredentials _credentials = const SipCredentials.empty();
+  late final AppLifecycleListener _lifecycle;
 
-  /// 저장된 값을 읽는 동안.
+  DeviceProfile _profile = const DeviceProfile.empty();
+
   bool _loading = true;
-
-  /// 다이얼러로 넘어가 있는 동안 중복 이동을 막는다.
+  bool _enrolling = false;
   bool _navigated = false;
 
   /// 사용자가 직접 등록을 해제하고 돌아온 상태. 이때는 자동 등록하지 않는다.
   bool _manual = false;
 
+  /// 401 재발급은 한 번만. 계속 401 이면 자격이 아니라 계정 문제다.
+  bool _retriedAfter401 = false;
+
+  /// 등록까지 가지 못한 이유. 화면에 그대로 보여 준다.
+  String? _blocker;
+
+  /// 승인 대기 등, 사용자가 기다리는 것 말고 할 일이 없는 상태.
+  bool _pending = false;
+
   @override
   void initState() {
     super.initState();
     _service.addListener(_onServiceChanged);
+    // Janus 등록 만료는 10분이다. 앱이 사라진 뒤 그 시간이 지나야 Kamailio 가
+    // "없음" 으로 보고 다시 푸시를 건다 — 그 사이 착신은 죽은 세션으로 간다.
+    // 종료할 때 세션을 명시적으로 닫으면 그 창이 사라진다.
+    _lifecycle = AppLifecycleListener(onDetach: _service.disconnect);
     _bootstrap();
   }
 
   @override
   void dispose() {
+    _lifecycle.dispose();
     _service.removeListener(_onServiceChanged);
     _service.dispose();
+    _enrollment.dispose();
     super.dispose();
   }
 
   Future<void> _bootstrap() async {
-    final saved = await _store.load();
+    final profile = await _store.load();
     if (!mounted) return;
     setState(() {
-      _credentials = saved;
+      _profile = profile;
       _loading = false;
     });
-    if (saved.isComplete) {
-      _register();
+    if (profile.isComplete) {
+      _enrollAndRegister();
     } else {
       _openSettings();
     }
   }
 
+  /// 자격을 받아 Janus 에 등록한다.
+  Future<void> _enrollAndRegister() async {
+    if (!_profile.isComplete || _enrolling) return;
+    setState(() {
+      _manual = false;
+      _pending = false;
+      _blocker = null;
+      _enrolling = true;
+    });
+
+    final account = await _fetchAccount();
+    if (!mounted) return;
+    setState(() => _enrolling = false);
+    if (account == null) return;   // 이유는 _blocker 에 담겼다
+
+    await _service.connectAndRegister(
+      serverUrl: _profile.janusUrl,
+      apiSecret: _profile.apiSecret,
+      account: account,
+    );
+  }
+
+  /// `/register/mobile` 로 SIP 자격을 받아 온다.
+  Future<SipAccount?> _fetchAccount() async {
+    final token = await PushService.token();
+    if (token == null) {
+      // 이 호출은 저장된 토큰을 덮어쓴다. 빈 값을 보내면 그 단말의 푸시가 조용히
+      // 끊기므로 아예 부르지 않는다.
+      final cached = _profile.sip;
+      if (cached != null) return cached;
+      setState(() => _blocker =
+          'FCM 토큰을 얻지 못해 서버에 자격을 요청할 수 없습니다.\n'
+          'google-services.json 을 넣고 다시 실행하세요.');
+      return null;
+    }
+
+    final result = await _enrollment.registerMobile(
+      uuid: _profile.uuid,
+      email: _profile.email,
+      complex: _profile.complexId,
+      address: _profile.address,
+      fcmToken: token,
+      signalingUrl: _profile.janusUrl,
+    );
+    if (!mounted) return null;
+
+    if (!result.ok) {
+      setState(() => _blocker = result.message);
+      return null;
+    }
+    if (result.isPending) {
+      setState(() {
+        _pending = true;
+        _blocker = result.message;
+      });
+      return null;
+    }
+
+    final account = result.account;
+    if (account == null) {
+      setState(() => _blocker = result.message);
+      return null;
+    }
+
+    await _store.saveSip(account);
+    if (mounted) setState(() => _profile = _profile.copyWith(sip: account));
+    return account;
+  }
+
   /// 등록은 SipRegisteredEvent 로 완료되므로 상태 변화를 보고 넘어간다.
   Future<void> _onServiceChanged() async {
-    if (!mounted || _navigated) return;
-    if (!_service.isRegistered) return;
+    if (!mounted) return;
+
+    // 비밀번호가 바뀌면 401 이 온다. 자격을 다시 받아 한 번 더 시도한다.
+    if (_service.registrationState == SipRegistrationState.failed &&
+        _service.registrationFailureCode == 401 &&
+        !_retriedAfter401) {
+      _retriedAfter401 = true;
+      await _store.saveSip(null);
+      _profile = _profile.copyWith(sip: null);
+      _enrollAndRegister();
+      return;
+    }
+
+    if (_navigated || !_service.isRegistered) return;
+    _retriedAfter401 = false;
 
     _navigated = true;
     final exit = await Navigator.of(context).push<DialerExit>(
@@ -79,36 +186,25 @@ class _ConnectScreenState extends State<ConnectScreen> {
     setState(() => _navigated = false);
 
     if (exit == DialerExit.connectionLost) {
-      // 사용자가 끊은 게 아니라 시그널링이 죽은 것이다. 조용히 다시 붙는다.
-      _register();
+      _enrollAndRegister();
       return;
     }
     setState(() => _manual = true);
   }
 
-  Future<void> _register() async {
-    if (!_credentials.isComplete) return;
-    setState(() => _manual = false);
-    await _service.connectAndRegister(
-      serverUrl: _credentials.serverUrl,
-      apiSecret: _credentials.apiSecret,
-      extension: _credentials.extension,
-      password: _credentials.password,
-    );
-  }
-
   Future<void> _openSettings() async {
-    final result = await Navigator.of(context).push<SipCredentials>(
-      MaterialPageRoute<SipCredentials>(
-        builder: (_) => SettingsScreen(initial: _credentials),
+    final result = await Navigator.of(context).push<DeviceProfile>(
+      MaterialPageRoute<DeviceProfile>(
+        builder: (_) => SettingsScreen(initial: _profile),
       ),
     );
     if (!mounted || result == null) return;
-    setState(() => _credentials = result);
-    _register();
+    setState(() => _profile = result);
+    _enrollAndRegister();
   }
 
   bool get _busy =>
+      _enrolling ||
       _service.registrationState == SipRegistrationState.connecting ||
       _service.registrationState == SipRegistrationState.registering;
 
@@ -132,35 +228,33 @@ class _ConnectScreenState extends State<ConnectScreen> {
                   // IntrinsicHeight 가 그 높이를 잡아 준다.
                   child: IntrinsicHeight(
                     child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  const Spacer(flex: 2),
-                  const JanusMark(width: 180),
-                  const SizedBox(height: 8),
-                  const Text(
-                    'Janus Client',
-                    textAlign: TextAlign.center,
-                    style: TextStyle(
-                      fontSize: 28,
-                      fontWeight: FontWeight.w700,
-                      letterSpacing: -0.4,
-                    ),
-                  ),
-                  const SizedBox(height: 6),
-                  Text(
-                    _credentials.extension.isEmpty
-                        ? '인터폰 통화 · SIP over WebRTC'
-                        : '내선 ${_credentials.extension} · ${SipConfig.domain}',
-                    textAlign: TextAlign.center,
-                    style: TextStyle(
-                      fontSize: 13,
-                      color: AppPalette.mist.withValues(alpha: 0.72),
-                      letterSpacing: 0.4,
-                    ),
-                  ),
-                  const Spacer(flex: 3),
-                  ..._buildStatus(context),
-                ],
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        const Spacer(flex: 2),
+                        const JanusMark(width: 180),
+                        const SizedBox(height: 8),
+                        const Text(
+                          'Janus Client',
+                          textAlign: TextAlign.center,
+                          style: TextStyle(
+                            fontSize: 28,
+                            fontWeight: FontWeight.w700,
+                            letterSpacing: -0.4,
+                          ),
+                        ),
+                        const SizedBox(height: 6),
+                        Text(
+                          _subtitle,
+                          textAlign: TextAlign.center,
+                          style: TextStyle(
+                            fontSize: 13,
+                            color: AppPalette.mist.withValues(alpha: 0.72),
+                            letterSpacing: 0.4,
+                          ),
+                        ),
+                        const Spacer(flex: 3),
+                        ..._buildStatus(context),
+                      ],
                     ),
                   ),
                 ),
@@ -170,6 +264,15 @@ class _ConnectScreenState extends State<ConnectScreen> {
         ),
       ),
     );
+  }
+
+  String get _subtitle {
+    final sip = _profile.sip;
+    if (sip != null) return '내선 ${sip.user} · ${sip.domain}';
+    if (_profile.complexName.isNotEmpty) {
+      return '${_profile.complexName} · ${_profile.building}동 ${_profile.unit}호';
+    }
+    return '인터폰 통화 · SIP over WebRTC';
   }
 
   List<Widget> _buildStatus(BuildContext context) {
@@ -184,21 +287,41 @@ class _ConnectScreenState extends State<ConnectScreen> {
     }
 
     if (_busy) {
-      return const [
+      return [
         StatusPill(
           tone: StatusTone.info,
           busy: true,
-          message: '서버에 등록하는 중…',
+          message: _enrolling ? '서버에서 자격을 받는 중…' : '서버에 등록하는 중…',
         ),
       ];
     }
 
-    if (_failed) {
+    // 승인 대기처럼 사용자가 기다리는 것 말고 할 일이 없는 상태.
+    if (_pending) {
+      return [
+        StatusPill(
+          tone: StatusTone.warning,
+          icon: Icons.hourglass_bottom,
+          message: _blocker ?? '승인 대기 중입니다.',
+        ),
+        const SizedBox(height: 20),
+        GlowButton(
+          label: '다시 확인',
+          icon: Icons.refresh,
+          onPressed: _enrollAndRegister,
+        ),
+        const SizedBox(height: 12),
+        _settingsButton(),
+      ];
+    }
+
+    final blocker = _blocker;
+    if (blocker != null || _failed) {
       return [
         StatusPill(
           tone: StatusTone.danger,
           icon: Icons.error_outline,
-          message: _service.errorMessage ?? '등록에 실패했습니다',
+          message: blocker ?? _service.errorMessage ?? '등록에 실패했습니다',
         ),
         const SizedBox(height: 20),
         GlowButton(
@@ -208,7 +331,7 @@ class _ConnectScreenState extends State<ConnectScreen> {
         ),
         const SizedBox(height: 12),
         OutlinedButton.icon(
-          onPressed: _register,
+          onPressed: _enrollAndRegister,
           icon: const Icon(Icons.refresh, size: 18),
           label: const Padding(
             padding: EdgeInsets.symmetric(vertical: 12),
@@ -218,12 +341,12 @@ class _ConnectScreenState extends State<ConnectScreen> {
       ];
     }
 
-    if (!_credentials.isComplete) {
+    if (!_profile.isComplete) {
       return [
         const StatusPill(
           tone: StatusTone.warning,
           icon: Icons.settings_suggest_outlined,
-          message: '접속 정보가 아직 없습니다. 설정에서 서버와 계정을 입력하세요.',
+          message: '단지와 세대를 먼저 설정하세요.',
         ),
         const SizedBox(height: 20),
         GlowButton(
@@ -234,7 +357,6 @@ class _ConnectScreenState extends State<ConnectScreen> {
       ];
     }
 
-    // 등록을 해제하고 돌아온 상태.
     return [
       StatusPill(
         tone: StatusTone.neutral,
@@ -245,17 +367,21 @@ class _ConnectScreenState extends State<ConnectScreen> {
       GlowButton(
         label: 'SIP 등록',
         icon: Icons.login,
-        onPressed: _register,
+        onPressed: _enrollAndRegister,
       ),
       const SizedBox(height: 12),
-      OutlinedButton.icon(
-        onPressed: _openSettings,
-        icon: const Icon(Icons.settings_outlined, size: 18),
-        label: const Padding(
-          padding: EdgeInsets.symmetric(vertical: 12),
-          child: Text('설정 열기'),
-        ),
-      ),
+      _settingsButton(),
     ];
+  }
+
+  Widget _settingsButton() {
+    return OutlinedButton.icon(
+      onPressed: _openSettings,
+      icon: const Icon(Icons.settings_outlined, size: 18),
+      label: const Padding(
+        padding: EdgeInsets.symmetric(vertical: 12),
+        child: Text('설정 열기'),
+      ),
+    );
   }
 }

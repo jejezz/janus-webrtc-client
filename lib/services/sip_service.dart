@@ -6,6 +6,7 @@ import 'package:flutter_webrtc/flutter_webrtc.dart';
 import 'package:janus_client/janus_client.dart';
 import 'package:permission_handler/permission_handler.dart';
 import '../config/sip_config.dart';
+import '../models/sip_account.dart';
 import '../models/call_diagnostics.dart';
 import 'call_foreground_service.dart';
 import 'janus_connection.dart';
@@ -59,6 +60,15 @@ class SipService extends ChangeNotifier {
   String? _errorMessage;
 
   String? _extension;
+
+  /// 지금 쓰고 있는 SIP 자격.
+  SipAccount? _account;
+  SipAccount? get account => _account;
+
+  /// 마지막 등록 실패의 SIP 코드. 401 이면 비밀번호가 바뀐 것이므로
+  /// `/register/mobile` 을 다시 불러 새 값을 받아야 한다.
+  int? _registrationFailureCode;
+  int? get registrationFailureCode => _registrationFailureCode;
   String? _peer;
   String? _lastCallId;
 
@@ -126,19 +136,19 @@ class SipService extends ChangeNotifier {
   Future<void> connectAndRegister({
     required String serverUrl,
     required String apiSecret,
-    required String extension,
-    required String password,
-    String? displayName,
+    required SipAccount account,
   }) async {
     if (_registrationState == SipRegistrationState.connecting ||
         _registrationState == SipRegistrationState.registering) {
       return;
     }
     _setRegistration(SipRegistrationState.connecting);
+    _registrationFailureCode = null;
 
     try {
-      _extension = extension.trim();
-      await _establish(serverUrl, apiSecret, password, displayName);
+      _account = account;
+      _extension = account.user;
+      await _establish(serverUrl, apiSecret, account);
     } on JanusConnectionException catch (e) {
       await _abandon();
       _fail(e.message);
@@ -177,8 +187,7 @@ class SipService extends ChangeNotifier {
   Future<void> _establish(
     String serverUrl,
     String apiSecret,
-    String password,
-    String? displayName,
+    SipAccount account,
   ) async {
     // 각 단계가 실제로 성공했는지 확인한다. create 가 거절되면 여기서 멈추므로
     // session_id 가 비어 있는 채로 attach·message 가 나가지 않는다.
@@ -199,13 +208,14 @@ class SipService extends ChangeNotifier {
     final registration = Completer<void>();
     _registration = registration;
 
+    // username 과 authuser 를 같게 둔다. Kamailio 의
+    // auth_check("$fd","subscriber","1") 이 "digest 사용자명 == To 사용자명" 을
+    // 강제하므로, 다르면 401 이다 (client-migration.md).
     await sip.register(
-      SipConfig.toSipUri(_extension!),
-      authuser: _extension,
-      displayName: displayName?.trim().isNotEmpty == true
-          ? displayName!.trim()
-          : _extension,
-      secret: password,
+      account.uri,
+      authuser: account.user,
+      displayName: account.user,
+      secret: account.password,
       proxy: SipConfig.proxy,
       // 이 줄이 빠지면 INVITE 가 인터넷으로 새어 나가고 조용히 실패한다.
       outboundProxy: SipConfig.outboundProxy,
@@ -216,7 +226,7 @@ class SipService extends ChangeNotifier {
       _stageTimeout,
       onTimeout: () => throw _SipFailure(
         'SIP 등록 응답이 없습니다.\n'
-        '내선 번호와 비밀번호, Kamailio 계정을 확인하세요.',
+        '배정된 번호(${account.user})의 Kamailio 계정을 확인하세요.',
       ),
     );
   }
@@ -259,10 +269,14 @@ class SipService extends ChangeNotifier {
         return;
       }
       if (result is Map && result['event'] == 'registration_failed') {
+        final code = result['code'];
+        _registrationFailureCode = code is int ? code : null;
         _failRegistration(
-          'SIP 등록이 거절되었습니다 (${result['code'] ?? '?'} ${result['reason'] ?? ''}).\n'
-          '내선 번호와 비밀번호를 확인하세요.'
-              .trim(),
+          code == 401
+              // 자리를 물려받은 단말이 생기면 비밀번호가 새로 발급된다.
+              ? 'SIP 인증이 거절되었습니다 (401).\n서버에서 자격을 다시 받아 등록합니다.'
+              : 'SIP 등록이 거절되었습니다 (${code ?? '?'} ${result['reason'] ?? ''}).'
+                  .trim(),
         );
       }
     });
@@ -482,7 +496,7 @@ class SipService extends ChangeNotifier {
     _expectedHangup = false;
 
     try {
-      _peer = SipConfig.displayOf(SipConfig.toSipUri(target));
+      _peer = SipConfig.displayOf(SipConfig.toSipUri(target, domain: _account?.domain));
       // 발신을 누른 순간부터 켠다. 상대가 받기 전에 홈으로 나가도 마이크가
       // 살아 있어야 연결되자마자 소리가 간다.
       await CallForegroundService.start(peer: _peer);
@@ -498,7 +512,7 @@ class SipService extends ChangeNotifier {
 
       // offer 는 래퍼가 audioRecv 로 만든다. SDP 는 손대지 않는다 —
       // PCMU/PCMA 가 남아 있어야 인터폰과 소리가 통한다.
-      await sip.call(SipConfig.toSipUri(target));
+      await sip.call(SipConfig.toSipUri(target, domain: _account?.domain));
     } catch (e) {
       final reason = _describeSendFailure('발신에 실패했습니다', e);
       await _teardownCall();

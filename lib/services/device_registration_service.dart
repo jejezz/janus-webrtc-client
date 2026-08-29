@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:http/http.dart' as http;
 
 import '../config/sip_config.dart';
+import '../models/sip_account.dart';
 
 /// rtc-relay 단말 등록 결과.
 class DeviceRegistrationResult {
@@ -10,11 +11,23 @@ class DeviceRegistrationResult {
     required this.ok,
     required this.statusCode,
     required this.message,
+    this.status = '',
+    this.account,
   });
 
   final bool ok;
   final int statusCode;
   final String message;
+
+  /// 서버가 말한 승인 상태. `approved` 또는 `pending`.
+  final String status;
+
+  /// 서버가 배정한 SIP 자격. 없을 수 있다 — 번호를 받기 전에 승인된 옛 단말이나
+  /// 숫자가 아닌 동/호인 세대다. 그 경우 SIP 착신만 못 쓰고 나머지는 그대로다.
+  final SipAccount? account;
+
+  /// 승인은 났지만 아직 자리를 기다리는 중.
+  bool get isPending => status == 'pending';
 }
 
 /// 착신(인터폰 → 모바일)을 받기 위해 FCM 토큰과 SIP 내선을 서버에 이어 준다.
@@ -27,30 +40,27 @@ class DeviceRegistrationService {
 
   final http.Client _client;
 
-  /// `sip_user` 에 쓸 수 있는 문자와 길이 제한.
-  static final RegExp _sipUserPattern = RegExp(r'^[A-Za-z0-9._-]{1,64}$');
-
-  static bool isValidSipUser(String value) => _sipUserPattern.hasMatch(value);
-
-  /// 단말을 등록한다.
+  /// 단말을 등록하고 서버가 배정한 SIP 자격을 받아 온다.
   ///
-  /// [sipUser] 는 Kamailio 에 만든 내선과 **같아야** 한다. 다르면 푸시는 나가는데
-  /// 통화는 안 되는 상태가 된다. null 이면 서버의 기존 값을 건드리지 않는다
-  /// (빈 문자열을 보내면 연결이 끊기므로 아예 넣지 않는다).
+  /// `sip_user` 는 보내지 않는다. 번호는 서버가 동/호에서 계산해 배정하며,
+  /// 보내더라도 서버가 배정한 값이 이긴다 (client-migration.md).
+  ///
+  /// [fcmToken] 을 **빈 값으로 보내면 안 된다.** 이 호출은 저장된 토큰을
+  /// 덮어쓰므로, 빈 문자열을 넣으면 그 단말의 푸시가 조용히 끊긴다.
   Future<DeviceRegistrationResult> registerMobile({
     required String uuid,
     required String email,
     required String complex,
     required String address,
     required String fcmToken,
-    String? sipUser,
     String? signalingUrl,
   }) async {
-    if (sipUser != null && !isValidSipUser(sipUser)) {
+    if (fcmToken.trim().isEmpty) {
       return const DeviceRegistrationResult(
         ok: false,
         statusCode: 0,
-        message: 'sip_user 는 A-Z a-z 0-9 . _ - 만 64자까지 쓸 수 있습니다.',
+        message: 'FCM 토큰이 비어 있습니다.\n'
+            '빈 값으로 등록하면 이 단말의 푸시가 끊깁니다.',
       );
     }
 
@@ -62,7 +72,6 @@ class DeviceRegistrationService {
       'complex': complex,
       'address': address,
       'token': fcmToken,
-      if (sipUser != null && sipUser.isNotEmpty) 'sip_user': sipUser,
     };
 
     try {
@@ -75,10 +84,30 @@ class DeviceRegistrationService {
           .timeout(const Duration(seconds: 15));
 
       final ok = response.statusCode >= 200 && response.statusCode < 300;
+      if (!ok) {
+        return DeviceRegistrationResult(
+          ok: false,
+          statusCode: response.statusCode,
+          message: _messageOf(response.body, response.statusCode),
+        );
+      }
+
+      Map<String, dynamic>? decoded;
+      try {
+        final parsed = jsonDecode(response.body);
+        if (parsed is Map<String, dynamic>) decoded = parsed;
+      } catch (_) {
+        // 본문이 JSON 이 아니어도 등록 자체는 성공이다.
+      }
+
+      final status = (decoded?['status'] ?? '').toString();
+      final account = SipAccount.fromJson(decoded?['sip']);
       return DeviceRegistrationResult(
-        ok: ok,
+        ok: true,
         statusCode: response.statusCode,
-        message: ok ? '단말 등록 완료' : _messageOf(response.body, response.statusCode),
+        message: _successMessage(status, account),
+        status: status,
+        account: account,
       );
     } catch (e) {
       return DeviceRegistrationResult(
@@ -87,6 +116,18 @@ class DeviceRegistrationService {
         message: '단말 등록 요청에 실패했습니다: $e',
       );
     }
+  }
+
+  String _successMessage(String status, SipAccount? account) {
+    if (status == 'pending') {
+      return '승인 대기 중입니다.\n월패드에서 이 단말을 승인해야 합니다.';
+    }
+    if (account == null) {
+      // 번호를 받기 전에 승인된 옛 단말이거나, 숫자가 아닌 동/호인 세대다.
+      return '단말 등록 완료 — 다만 이 세대에는 배정된 SIP 번호가 없습니다.\n'
+          'SIP 착신은 쓸 수 없고 WebRTC 초인종은 그대로 동작합니다.';
+    }
+    return '단말 등록 완료 · 내선 ${account.user}';
   }
 
   String _messageOf(String body, int statusCode) {
