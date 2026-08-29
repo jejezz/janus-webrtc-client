@@ -1,0 +1,77 @@
+{
+  "project_info": {
+    "project_number": "172988175276",
+    "firebase_url": "https://callfusion2rct.firebaseio.com",
+    "project_id": "callfusion2rct",
+    "storage_bucket": "callfusion2rct.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:172988175276:android:b664dd5dffd3d74f0ca009",
+        "android_client_info": {
+          "package_name": "com.europa.janus_client_app"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAd7fNEaN14QSuuIcgswdVFWRgFoDmzWgM"
+        },
+        {
+          "current_key": "AIzaSyBpmhIxcponkz0iy4IJ8ghgsGCoIsEs5tY"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:172988175276:android:11400bc4a8b741340ca009",
+        "android_client_info": {
+          "package_name": "com.europa.rtc.mobile"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAd7fNEaN14QSuuIcgswdVFWRgFoDmzWgM"
+        },
+        {
+          "current_key": "AIzaSyBpmhIxcponkz0iy4IJ8ghgsGCoIsEs5tY"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:172988175276:android:4fad6c14517ecc6d0ca009",
+        "android_client_info": {
+          "package_name": "com.pluto.rtc.mobile"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAd7fNEaN14QSuuIcgswdVFWRgFoDmzWgM"
+        },
+        {
+          "current_key": "AIzaSyBpmhIxcponkz0iy4IJ8ghgsGCoIsEs5tY"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
