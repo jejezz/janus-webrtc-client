@@ -504,6 +504,9 @@ class SipService extends ChangeNotifier {
       return;
     }
     if (hasCall) return;
+    // WebRTC 를 건드리기 전에 본다. 미디어를 세운 뒤에 보면 ICE 가 망을 새로
+    // 잡는 사이라 플래그가 내려가 있어, 멀쩡한 발신까지 막아 버린다.
+    if (!verifyLink()) return;
     _clearError();
     if (!await _ensureMicrophone()) return;
     _expectedHangup = false;
@@ -764,6 +767,30 @@ class SipService extends ChangeNotifier {
   ///
   /// 죽은 트랜스포트를 그대로 두면 자동 재연결 루프가 계속 돌면서 처리되지 않는
   /// 예외를 던지고, 재등록 때마다 하나씩 쌓인다. 여기서 확실히 닫는다.
+  /// 시그널링이 아직 살아 있는지 보고, 끊겨 있으면 등록을 내려놓는다.
+  ///
+  /// 앱이 백그라운드로 내려가 몇 초만 지나도 안드로이드가 소켓을 닫는다.
+  /// 그런데 janus_client 는 그것을 알려 주지 않는다 — 화면은 "등록됨" 인 채로
+  /// 발신만 조용히 실패하고, 그 실패조차 처리되지 않는 예외로 새 나가서
+  /// 우리 catch 에 걸리지 않는다. 사용자가 직접 등록을 풀고 다시 붙이기
+  /// 전까지 계속 그 상태다.
+  ///
+  /// 주기적으로 보지 않는다. 앱이 앞으로 돌아온 순간과 발신을 시작하는
+  /// 순간에만 본다. 통화 중에는 WebRTC 가 ICE 때문에 망을 새로 잡으면서 이
+  /// 플래그가 잠깐 내려가는데, 그때 판단하면 멀쩡한 통화를 끊어 버린다.
+  ///
+  /// 살아 있으면 true. 끊겨 있으면 [_dropLink] 로 등록 실패를 알리고 false.
+  bool verifyLink() {
+    if (hasCall) return true;
+    final connection = _connection;
+    if (connection == null || !isRegistered) return true;
+    if (connection.isAlive) return true;
+
+    debugPrint('[링크] 시그널링이 끊겨 있다 — 등록을 내려놓는다');
+    _dropLink();
+    return false;
+  }
+
   void _dropLink() {
     _stopStatsPolling();
     _callState = CallState.none;

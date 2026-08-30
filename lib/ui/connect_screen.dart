@@ -83,7 +83,7 @@ class _ConnectScreenState extends State<ConnectScreen> {
     // "없음" 으로 보고 다시 푸시를 건다 — 그 사이 착신은 죽은 세션으로 간다.
     // 종료할 때 세션을 명시적으로 닫으면 그 창이 사라진다.
     _lifecycle = AppLifecycleListener(
-      onResume: _retryNow,
+      onResume: _onResume,
       onDetach: _service.disconnect,
     );
     PushService.enrollmentEvent.addListener(_onEnrollmentEvent);
@@ -142,6 +142,17 @@ class _ConnectScreenState extends State<ConnectScreen> {
       if (!mounted || _service.hasCall) return;
       _enrollAndRegister(isRetry: true);
     });
+  }
+
+  /// 앱이 앞으로 돌아왔을 때.
+  ///
+  /// 백그라운드에 있는 동안 시그널링 소켓이 닫혔을 수 있다. 그러면 화면은
+  /// "등록됨" 인데 발신만 실패하므로, 먼저 그것부터 확인한다. 끊겨 있었다면
+  /// 서비스가 등록 실패를 알리고 _onServiceChanged 가 재시도를 예약하는데,
+  /// 이어지는 [_retryNow] 가 그 대기를 곧바로 앞당긴다.
+  void _onResume() {
+    _service.verifyLink();
+    _retryNow();
   }
 
   /// 앱이 앞으로 돌아오면 밀려 있던 재시도를 앞당긴다.
