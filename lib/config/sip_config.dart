@@ -32,6 +32,13 @@ class SipConfig {
     defaultValue: '0010200601',
   );
 
+  /// 발신 후 이 시간 안에 연결되지 않으면 끊는다. 상대가 꺼져 있으면 SIP 가
+  /// 아무 응답도 주지 않아 화면이 "발신 중" 에서 영원히 멈춘다.
+  static const Duration callTimeout = Duration(seconds: 30);
+
+  /// 착신을 이 시간 안에 받지 않으면 끊는다.
+  static const Duration answerTimeout = Duration(seconds: 30);
+
   /// Janus 세션 타임아웃이 60초다. 그보다 넉넉히 짧게 keepalive 를 보낸다.
   static const int keepaliveIntervalSeconds = 30;
 

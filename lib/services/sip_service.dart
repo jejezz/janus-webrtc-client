@@ -89,6 +89,7 @@ class SipService extends ChangeNotifier {
   bool _remoteTrackArrived = false;
   Timer? _statsTimer;
   Timer? _errorTimer;
+  Timer? _callTimeout;
 
   /// 마이크 권한이 막혀 통화를 시작하지 못한 상태.
   ///
@@ -298,6 +299,10 @@ class SipService extends ChangeNotifier {
         _peer = SipConfig.displayOf(data.result?.username);
         _lastCallId = data.callId;
         _setCall(CallState.incoming);
+        _armCallTimeout(
+          SipConfig.answerTimeout,
+          '받지 않아 통화가 종료되었습니다.',
+        );
       } else if (data is SipCallingEvent) {
         _setCall(CallState.outgoing);
       } else if (data is SipRingingEvent) {
@@ -307,6 +312,7 @@ class SipService extends ChangeNotifier {
         await _applyAnswer(sip, event.jsep);
         _setCall(CallState.ringing);
       } else if (data is SipAcceptedEvent) {
+        _callTimeout?.cancel();
         _clearError();
         await _applyAnswer(sip, event.jsep);
         _connectedAt = DateTime.now();
@@ -513,6 +519,7 @@ class SipService extends ChangeNotifier {
       // offer 는 래퍼가 audioRecv 로 만든다. SDP 는 손대지 않는다 —
       // PCMU/PCMA 가 남아 있어야 인터폰과 소리가 통한다.
       await sip.call(SipConfig.toSipUri(target, domain: _account?.domain));
+      _armCallTimeout(SipConfig.callTimeout, '응답이 없어 통화를 종료했습니다.');
     } catch (e) {
       final reason = _describeSendFailure('발신에 실패했습니다', e);
       await _teardownCall();
@@ -551,6 +558,7 @@ class SipService extends ChangeNotifier {
       await sip.accept();
 
       _connectedAt = DateTime.now();
+      _callTimeout?.cancel();
       _expectedHangup = true;
       _startStatsPolling();
       _setCall(CallState.active);
@@ -599,6 +607,20 @@ class SipService extends ChangeNotifier {
     }
   }
 
+  /// 연결되지 않은 채 시간이 지나면 스스로 끊는다.
+  ///
+  /// 상대가 꺼져 있거나 네트워크가 막히면 SIP 는 아무 응답도 주지 않는다. 그러면
+  /// 화면은 "발신 중" 에서 영원히 멈춘 채로 마이크만 잡고 있게 된다.
+  void _armCallTimeout(Duration limit, String message) {
+    _callTimeout?.cancel();
+    _callTimeout = Timer(limit, () {
+      if (_callState == CallState.active || _callState == CallState.none) return;
+      _expectedHangup = true;   // 우리가 끊는 것이므로 실패로 보고하지 않는다
+      unawaited(hangup());
+      _fail(message);
+    });
+  }
+
   /// 통화 중 DTMF 를 보낸다. 인터폰의 문 열기 같은 기능이 이걸로 동작한다.
   ///
   /// janus_client 의 SIP 래퍼에는 DTMF 가 없어 Janus 요청을 직접 보낸다.
@@ -636,6 +658,8 @@ class SipService extends ChangeNotifier {
   }
 
   Future<void> _teardownCall() async {
+    _callTimeout?.cancel();
+    _callTimeout = null;
     await CallForegroundService.stop();
     _stopStatsPolling();
     _diagnostics = const CallDiagnostics();

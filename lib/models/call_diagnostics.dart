@@ -20,6 +20,8 @@ class CallDiagnostics {
     this.packetsSent = 0,
     this.packetsReceived = 0,
     this.remoteTrackArrived = false,
+    this.lossPercent,
+    this.rttMs,
     this.candidatePair,
     this.localAudioDirection,
     this.remoteAudioDirection,
@@ -27,6 +29,13 @@ class CallDiagnostics {
   });
 
   final RTCIceConnectionState? iceState;
+
+  /// 받은 것 대비 잃어버린 비율. 소리가 끊기는지 가른다 — 바이트는 흐르는데
+  /// 끊겨 들린다면 여기가 올라가 있다.
+  final double? lossPercent;
+
+  /// 왕복 시간(ms). 지연이 체감될 때 근거가 된다.
+  final int? rttMs;
 
   /// 협상된 오디오 코덱 (`audio/PCMU`, `audio/opus` 등).
   final String? audioCodec;
@@ -91,6 +100,8 @@ class CallDiagnostics {
     int? packetsSent,
     int? packetsReceived,
     bool? remoteTrackArrived,
+    double? lossPercent,
+    int? rttMs,
     String? candidatePair,
     String? localAudioDirection,
     String? remoteAudioDirection,
@@ -104,6 +115,8 @@ class CallDiagnostics {
       packetsSent: packetsSent ?? this.packetsSent,
       packetsReceived: packetsReceived ?? this.packetsReceived,
       remoteTrackArrived: remoteTrackArrived ?? this.remoteTrackArrived,
+      lossPercent: lossPercent ?? this.lossPercent,
+      rttMs: rttMs ?? this.rttMs,
       candidatePair: candidatePair ?? this.candidatePair,
       localAudioDirection: localAudioDirection ?? this.localAudioDirection,
       remoteAudioDirection: remoteAudioDirection ?? this.remoteAudioDirection,
@@ -157,6 +170,8 @@ class CallDiagnostics {
     String? codecId;
     String? codec;
     String? candidatePair;
+    var packetsLost = 0;
+    int? rttMs;
 
     final byId = {for (final report in reports) report.id: report};
 
@@ -175,7 +190,13 @@ class CallDiagnostics {
           if (kind != 'audio') continue;
           bytesReceived += _asInt(values['bytesReceived']);
           packetsReceived += _asInt(values['packetsReceived']);
+          packetsLost += _asInt(values['packetsLost']);
           codecId ??= values['codecId'] as String?;
+        case 'remote-inbound-rtp':
+          // 상대가 보고해 주는 값이다. 초 단위라 ms 로 바꾼다.
+          final rtt = _asDouble(values['roundTripTime']);
+          if (rtt != null) rttMs = (rtt * 1000).round();
+          packetsLost += _asInt(values['packetsLost']);
         case 'candidate-pair':
           final nominated = values['nominated'] == true;
           final succeeded = values['state'] == 'succeeded';
@@ -184,6 +205,9 @@ class CallDiagnostics {
             final remote =
                 byId[values['remoteCandidateId']]?.values['candidateType'];
             candidatePair = '$local → $remote';
+            // 상대 보고가 없으면 후보쌍 값으로 대신한다.
+            final rtt = _asDouble(values['currentRoundTripTime']);
+            if (rttMs == null && rtt != null) rttMs = (rtt * 1000).round();
           }
       }
     }
@@ -200,11 +224,21 @@ class CallDiagnostics {
       packetsSent: packetsSent,
       packetsReceived: packetsReceived,
       remoteTrackArrived: remoteTrackArrived,
+      lossPercent: packetsReceived + packetsLost == 0
+          ? null
+          : packetsLost * 100 / (packetsReceived + packetsLost),
+      rttMs: rttMs,
       candidatePair: candidatePair,
       localAudioDirection: audioDirectionOf(localSdp),
       remoteAudioDirection: audioDirectionOf(remoteSdp),
       hasRemoteDescription: remoteSdp != null,
     );
+  }
+
+  static double? _asDouble(Object? value) {
+    if (value is num) return value.toDouble();
+    if (value is String) return double.tryParse(value);
+    return null;
   }
 
   static int _asInt(Object? value) {

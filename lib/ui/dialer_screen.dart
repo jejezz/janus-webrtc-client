@@ -556,6 +556,15 @@ class _DialerScreenState extends State<DialerScreen> {
             '${_kb(d.bytesReceived)}  (${d.packetsReceived} 패킷)',
             ok: d.receiving,
           ),
+          // 바이트는 흐르는데 끊겨 들릴 때 여기가 원인을 가른다.
+          if (d.lossPercent != null)
+            _diagRow(
+              '손실',
+              '${d.lossPercent!.toStringAsFixed(1)} %',
+              ok: d.lossPercent! < 5,
+            ),
+          if (d.rttMs != null)
+            _diagRow('왕복', '${d.rttMs} ms', ok: d.rttMs! < 300),
           _diagRow('원격 트랙', d.remoteTrackArrived ? '수신됨' : '없음',
               ok: d.remoteTrackArrived),
           if (d.hasRemoteDescription)
