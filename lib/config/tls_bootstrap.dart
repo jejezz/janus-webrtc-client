@@ -26,8 +26,8 @@ const String _caAssetPath = 'assets/certs/dev_ca.pem';
 Future<void> configureJanusTls() async {
   if (await _trustBundledCa()) return;
 
-  if (kDebugMode && !JanusConfig.strictTls) {
-    final hosts = JanusConfig.devTrustedHosts;
+  final hosts = JanusConfig.devTrustedHosts;
+  if (kDebugMode && !JanusConfig.strictTls && hosts.isNotEmpty) {
     HttpOverrides.global = _DevCertificateOverrides(hosts);
     debugPrint(
       '\n'

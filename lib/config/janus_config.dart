@@ -20,6 +20,20 @@ class JanusConfig {
     defaultValue: 'wss://www.zoomon.art/janus-ws',
   );
 
+  /// `--dart-define=JANUS_SERVER_URL` 로 직접 지정한 값. 지정하지 않으면 빈 값이다.
+  ///
+  /// 지정 여부를 알아야 하는 이유는, 아무것도 주지 않았을 때 단지 호스트에서
+  /// 주소를 조립하기 때문이다 ([DeviceProfile.janusUrl]). 기본값을 박아 두면
+  /// "지정한 것" 과 "그냥 기본값" 을 구별할 수 없다.
+  static const String serverUrlOverride =
+      String.fromEnvironment('JANUS_SERVER_URL');
+
+  /// Janus WebSocket 의 경로. 단지 호스트에서 주소를 조립할 때 쓴다.
+  static const String wsPath = String.fromEnvironment(
+    'JANUS_WS_PATH',
+    defaultValue: '/janus-ws',
+  );
+
   /// VideoRoom 기본 방 번호. janus.plugin.videoroom.jcfg 의 기본 방이 1234 다.
   static const String defaultRoom = String.fromEnvironment(
     'JANUS_ROOM',
@@ -42,9 +56,12 @@ class JanusConfig {
   static const bool strictTls = bool.fromEnvironment('JANUS_STRICT_TLS');
 
   /// 디버그 빌드에서 인증서 검증을 건너뛸 호스트 목록.
-  /// 기본값은 [defaultServerUrl] 의 호스트 하나뿐이라 다른 서버까지 열리지 않는다.
+  ///
+  /// 직접 지정한 개발 서버([serverUrlOverride])만 담는다. 운영 단지 호스트는
+  /// 자기 이름으로 발급된 인증서를 내놓으므로 우회할 이유가 없고, 여기에
+  /// 들어가면 릴리스에서만 터지는 문제를 디버그가 가려 버린다.
   static Set<String> get devTrustedHosts {
-    final host = Uri.tryParse(defaultServerUrl)?.host;
+    final host = Uri.tryParse(serverUrlOverride)?.host;
     return {
       if (host != null && host.isNotEmpty) host,
       ...const String.fromEnvironment('JANUS_DEV_TRUSTED_HOSTS')

@@ -86,13 +86,26 @@ class DeviceProfile {
   /// 단말 등록을 보낼 곳. **단지 호스트**에 있다.
   String get relayUrl => 'https://$complexHost${SipConfig.relayPath}';
 
-  /// Janus 시그널링 주소.
+  /// Janus 시그널링 주소. **단지 호스트에서 조립한다.**
   ///
-  /// **단지 호스트에서 조립하지 않는다.** 단지 호스트는 RTC 릴레이(`/relay/rtc`)
-  /// 가 사는 곳이고 그쪽은 프로토콜이 다르다. Janus 는 별도 호스트에 있으며,
-  /// 착신 푸시가 `janusUrl` 을 실어 보내면 그 값이 우선한다.
-  String get janusUrl =>
-      pushedJanusUrl.isNotEmpty ? pushedJanusUrl : JanusConfig.defaultServerUrl;
+  /// 릴레이와 프로토콜은 다르지만 사는 곳은 같은 서버다. 그래서 Firestore 가
+  /// 내려 준 단지 호스트를 그대로 쓰는 것이 맞다 — 이름을 하나로 박아 두면
+  /// 단지가 늘어날 때 따라가지 못한다.
+  ///
+  /// TLS 도 이쪽이 옳다. 단지 호스트는 자기 이름으로 발급된 인증서를 내놓지만
+  /// 박아 두었던 `www.zoomon.art` 는 그 인증서의 SAN 에 없어 hostname mismatch
+  /// 로 막힌다. 디버그 빌드가 검증을 건너뛰고 있어서 드러나지 않았을 뿐이다.
+  ///
+  /// 우선순위: 착신 푸시가 실어 보낸 주소 → `--dart-define` 으로 지정한 개발
+  /// 서버 → 단지 호스트.
+  String get janusUrl {
+    if (pushedJanusUrl.isNotEmpty) return pushedJanusUrl;
+    if (JanusConfig.serverUrlOverride.isNotEmpty) {
+      return JanusConfig.serverUrlOverride;
+    }
+    if (complexHost.isNotEmpty) return 'wss://$complexHost${JanusConfig.wsPath}';
+    return JanusConfig.defaultServerUrl;
+  }
 
   /// 등록을 시도할 수 있는 상태인지. SIP 자격은 여기 들어가지 않는다 — 그건
   /// 등록해 봐야 받는 값이다.
