@@ -144,6 +144,7 @@ class SipService extends ChangeNotifier {
     required String serverUrl,
     required String apiSecret,
     required SipAccount account,
+    String token = '',
   }) async {
     if (_registrationState == SipRegistrationState.connecting ||
         _registrationState == SipRegistrationState.registering) {
@@ -155,7 +156,7 @@ class SipService extends ChangeNotifier {
     try {
       _account = account;
       _extension = account.user;
-      await _establish(serverUrl, apiSecret, account);
+      await _establish(serverUrl, apiSecret, account, token);
     } on JanusConnectionException catch (e) {
       await _abandon();
       _fail(e.message);
@@ -195,12 +196,14 @@ class SipService extends ChangeNotifier {
     String serverUrl,
     String apiSecret,
     SipAccount account,
+    String token,
   ) async {
     // 각 단계가 실제로 성공했는지 확인한다. create 가 거절되면 여기서 멈추므로
     // session_id 가 비어 있는 채로 attach·message 가 나가지 않는다.
     final connection = await JanusConnection.open(
       serverUrl: serverUrl,
       apiSecret: apiSecret,
+      token: token,
       // 세션 타임아웃이 60초라 기본값(50초)보다 짧게 잡는다.
       refreshIntervalSeconds: SipConfig.keepaliveIntervalSeconds,
       timeout: _stageTimeout,

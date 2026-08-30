@@ -4,6 +4,7 @@ import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
 import '../config/janus_config.dart';
 import '../config/sip_config.dart';
+import '../models/janus_credentials.dart';
 import '../models/sip_account.dart';
 
 /// 이 단말이 누구인지, 그리고 서버가 배정해 준 SIP 자격.
@@ -21,6 +22,7 @@ class DeviceProfile {
     required this.building,
     required this.unit,
     required this.apiSecret,
+    this.janus = JanusCredentials.empty,
     this.pushedJanusUrl = '',
     this.speakerByDefault = true,
     this.sip,
@@ -35,6 +37,7 @@ class DeviceProfile {
         building = '',
         unit = '',
         apiSecret = '',
+        janus = JanusCredentials.empty,
         pushedJanusUrl = '',
         speakerByDefault = true,
         sip = null;
@@ -53,8 +56,15 @@ class DeviceProfile {
   final String building;
   final String unit;
 
-  /// Janus 의 api_secret. 단지 서버 구성에 딸린 값이라 사용자가 넣는다.
+  /// Janus 의 api_secret. 단지 하나에 하나뿐인 공유 값이라, 사람이 손으로
+  /// 넣어야 했다. [janus] 에 토큰이 있으면 쓰지 않는다.
   final String apiSecret;
+
+  /// 서버가 승인 응답으로 내려 준 Janus 접속 정보.
+  ///
+  /// 토큰은 단말마다 다르다. 한 대가 털려도 그 한 대만 막으면 되고, 사람이
+  /// 외워서 넣을 일도 없다.
+  final JanusCredentials janus;
 
   /// 착신 푸시가 알려 준 Janus 주소. 비어 있으면 기본값을 쓴다.
   final String pushedJanusUrl;
@@ -104,8 +114,18 @@ class DeviceProfile {
       return JanusConfig.serverUrlOverride;
     }
     if (complexHost.isNotEmpty) return 'wss://$complexHost${JanusConfig.wsPath}';
+    // 단지 호스트를 모를 때만 서버가 준 주소를 쓴다. 서버가 개발용 호스트를
+    // 실어 보낸 적이 있어 앞에 두지 않는다.
+    if (janus.url.isNotEmpty) return janus.url;
     return JanusConfig.defaultServerUrl;
   }
+
+  /// Janus 에 실제로 실어 보낼 API Secret.
+  ///
+  /// 단말 토큰이 있으면 공유 시크릿은 쓰지 않는다. 설정에 넣어 둔 옛 값이
+  /// 남아 있어도 마찬가지다 — 단말별 값이 있는데 단지 전체가 공유하는 값으로
+  /// 붙을 이유가 없다.
+  String get effectiveApiSecret => janus.token.isNotEmpty ? '' : apiSecret;
 
   /// 등록을 시도할 수 있는 상태인지. SIP 자격은 여기 들어가지 않는다 — 그건
   /// 등록해 봐야 받는 값이다.
@@ -125,6 +145,7 @@ class DeviceProfile {
     String? building,
     String? unit,
     String? apiSecret,
+    JanusCredentials? janus,
     String? pushedJanusUrl,
     bool? speakerByDefault,
     SipAccount? sip,
@@ -138,6 +159,7 @@ class DeviceProfile {
       building: building ?? this.building,
       unit: unit ?? this.unit,
       apiSecret: apiSecret ?? this.apiSecret,
+      janus: janus ?? this.janus,
       pushedJanusUrl: pushedJanusUrl ?? this.pushedJanusUrl,
       speakerByDefault: speakerByDefault ?? this.speakerByDefault,
       sip: sip ?? this.sip,
@@ -175,6 +197,8 @@ class CredentialStore {
   /// 있으므로 한 번 넘겨받는다 — 아니면 사용자가 32자리를 다시 쳐야 한다.
   static const _legacyApiSecret = 'sip.api_secret';
   static const _keyPushedJanus = 'janus.pushed_url';
+  static const _keyJanusToken = 'janus.token';
+  static const _keyJanusServerUrl = 'janus.server_url';
   static const _keySpeakerDefault = 'call.speaker_default';
   static const _keySipUser = 'sip.user';
   static const _keySipDomain = 'sip.domain';
@@ -195,6 +219,8 @@ class CredentialStore {
       _storage.read(key: _keySipPassword),
       _storage.read(key: _keyPushedJanus),
       _storage.read(key: _keySpeakerDefault),
+      _storage.read(key: _keyJanusToken),
+      _storage.read(key: _keyJanusServerUrl),
     ]);
 
     // 새 키가 비었으면 옛 키를 본다.
@@ -220,6 +246,10 @@ class CredentialStore {
       building: values[5] ?? '',
       unit: values[6] ?? '',
       apiSecret: apiSecret,
+      janus: JanusCredentials(
+        token: values[13] ?? '',
+        url: values[14] ?? '',
+      ),
       pushedJanusUrl: values[11] ?? '',
       // 저장된 적이 없으면 켬으로 둔다.
       speakerByDefault: values[12] != 'false',
@@ -261,6 +291,19 @@ class CredentialStore {
       _storage.write(key: _keySipUser, value: account?.user ?? ''),
       _storage.write(key: _keySipDomain, value: account?.domain ?? ''),
       _storage.write(key: _keySipPassword, value: account?.password ?? ''),
+    ]);
+  }
+
+  /// 서버가 내려준 Janus 접속 정보를 남긴다.
+  ///
+  /// 빈 값은 지우지 않는다. 서버가 이번 응답에 안 실었다고 해서 지우면, 아직
+  /// 이 값을 보내지 않는 서버에 붙을 때마다 통화가 죽는다.
+  Future<void> saveJanus(JanusCredentials janus) async {
+    await Future.wait([
+      if (janus.token.isNotEmpty)
+        _storage.write(key: _keyJanusToken, value: janus.token),
+      if (janus.url.isNotEmpty)
+        _storage.write(key: _keyJanusServerUrl, value: janus.url),
     ]);
   }
 

@@ -1,5 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:janus_client_app/config/sip_config.dart';
+import 'package:janus_client_app/models/janus_credentials.dart';
 import 'package:janus_client_app/models/sip_account.dart';
 import 'package:janus_client_app/services/credential_store.dart';
 
@@ -118,6 +119,49 @@ void main() {
         pushedJanusUrl: 'wss://pushed.test/janus-ws',
       );
       expect(profile.janusUrl, 'wss://pushed.test/janus-ws');
+    });
+
+    test('단말 토큰이 있으면 공유 API Secret 은 쓰지 않는다', () {
+      const withToken = DeviceProfile(
+        uuid: 'u',
+        email: 'a@b.c',
+        complexId: 'c',
+        complexName: '단지',
+        complexHost: 'example.test',
+        building: '101',
+        unit: '805',
+        apiSecret: '사람이-넣어-둔-옛-값',
+        janus: JanusCredentials(token: 'per-device'),
+      );
+      expect(withToken.effectiveApiSecret, isEmpty);
+
+      const withoutToken = DeviceProfile(
+        uuid: 'u',
+        email: 'a@b.c',
+        complexId: 'c',
+        complexName: '단지',
+        complexHost: 'example.test',
+        building: '101',
+        unit: '805',
+        apiSecret: '공유-시크릿',
+      );
+      expect(withoutToken.effectiveApiSecret, '공유-시크릿');
+    });
+
+    test('Janus 주소는 서버가 준 값보다 단지 호스트가 앞이다', () {
+      const profile = DeviceProfile(
+        uuid: 'u',
+        email: 'a@b.c',
+        complexId: 'c',
+        complexName: '단지',
+        complexHost: 'example.test',
+        building: '101',
+        unit: '805',
+        apiSecret: 's',
+        janus: JanusCredentials(url: 'wss://dev.test/janus-ws'),
+      );
+      // 인증서가 단지 호스트 이름으로 발급되므로 그쪽이 정본이다.
+      expect(profile.janusUrl, 'wss://example.test/janus-ws');
     });
 
     test('SIP 자격은 완결 조건에 들어가지 않는다 — 등록해 봐야 받는 값이다', () {

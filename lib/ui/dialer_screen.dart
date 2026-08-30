@@ -57,7 +57,12 @@ class _DialerScreenState extends State<DialerScreen> {
   /// 키패드를 펼쳐 둘지. 전화 거는 화면이므로 기본은 펼침이다.
   bool _keypadOpen = true;
 
-  /// 통화 중 키패드. DTMF 를 보내는 자리다 — 인터폰의 문 열기가 이걸로 동작한다.
+  /// 통화 중 키패드. DTMF 를 보내는 자리다.
+  ///
+  /// 문 열기가 이 경로인지는 확인되지 않았다. 안드로이드 원본의 문열림 버튼은
+  /// 안내음을 내고 통화를 끊을 뿐 선로로 아무것도 내보내지 않는다 —
+  /// `CallSession.doorOpen()` 안의 `DeviceManager.setDoorOpen()` 이 주석 처리된
+  /// 채로 남아 있다. 실제로 문을 여는 쪽은 월패드다.
   bool _inCallKeypad = false;
 
   /// 입력칸 좌우에 같은 폭을 둬야 번호가 가운데에 선다. 좁게 잡는다 — 양쪽에

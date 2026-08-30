@@ -133,7 +133,12 @@ class _ConnectScreenState extends State<ConnectScreen> {
     });
   }
 
-  /// 실패했을 때 스스로 다시 붙는다. 사용자가 버튼을 누를 때까지 기다리면
+  /// 실패했을 때 스스로 다시 붙는다.
+  ///
+  /// 재시도는 릴레이부터 다시 부르므로 자격도 함께 새로 받는다. 단말 토큰이
+  /// 무효가 되어도 — 승인이 거두어졌거나 Janus 가 재시작해 메모리에 있던
+  /// 토큰이 사라졌거나 — 다음 시도에서 새 값으로 갈아탄다.
+  /// 사용자가 버튼을 누를 때까지 기다리면
   /// 지하철에서 한 번 실패한 뒤 나와도 계속 미등록으로 남는다.
   void _scheduleRetry(Duration delay, {bool reset = false}) {
     _retry?.cancel();
@@ -225,8 +230,9 @@ class _ConnectScreenState extends State<ConnectScreen> {
     _service.speakerByDefault = _profile.speakerByDefault;
     await _service.connectAndRegister(
       serverUrl: _profile.janusUrl,
-      apiSecret: _profile.apiSecret,
+      apiSecret: _profile.effectiveApiSecret,
       account: account,
+      token: _profile.janus.token,
     );
   }
 
@@ -259,6 +265,13 @@ class _ConnectScreenState extends State<ConnectScreen> {
       setState(() => _blocker = result.message);
       return null;
     }
+    // Janus 접속 정보는 실려 있을 때만 갱신한다. 이번 응답에 없다고 지우면
+    // 아직 이 값을 보내지 않는 서버에 붙을 때마다 통화가 죽는다.
+    if (!result.janus.isEmpty) {
+      await _store.saveJanus(result.janus);
+      if (mounted) setState(() => _profile = _profile.copyWith(janus: result.janus));
+    }
+
     if (result.isPending) {
       setState(() {
         _pending = true;
@@ -329,6 +342,7 @@ class _ConnectScreenState extends State<ConnectScreen> {
     debugPrint('[등록] ${delay.inSeconds}초 뒤 다시 시도합니다 ($_retryCount번째)');
     _scheduleRetry(delay);
   }
+
 
   Future<void> _openSettings() async {
     final result = await Navigator.of(context).push<DeviceProfile>(

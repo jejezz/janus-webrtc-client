@@ -48,9 +48,11 @@ class JanusConnection {
     required String serverUrl,
     required String apiSecret,
     required int refreshIntervalSeconds,
+    String token = '',
     Duration timeout = defaultTimeout,
   }) async {
     final secret = apiSecret.trim();
+    final janusToken = token.trim();
     final log = _SwallowedErrorLog();
     final transport = JanusConfig.transportFor(serverUrl);
 
@@ -58,9 +60,13 @@ class JanusConnection {
       transport: transport,
       iceServers: JanusConfig.iceServers,
       isUnifiedPlan: true,
-      // apisecret 은 모든 요청에 실려야 한다. 빠지면 전부 403.
-      withCredentials: secret.isNotEmpty,
+      // 자격은 모든 요청에 실려야 한다. 빠지면 전부 403.
+      //
+      // 토큰이 있으면 그것이 이 단말의 자격이다. 공유 시크릿은 전환이 끝날
+      // 때까지만 함께 싣는다.
+      withCredentials: secret.isNotEmpty || janusToken.isNotEmpty,
       apiSecret: secret.isNotEmpty ? secret : null,
+      token: janusToken.isNotEmpty ? janusToken : null,
       refreshInterval: refreshIntervalSeconds,
       // 자체 로거를 넘겨 삼켜지는 오류를 가로챈다.
       logger: log.logger,

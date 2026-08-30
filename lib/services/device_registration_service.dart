@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart';
 
 import 'package:http/http.dart' as http;
 
+import '../models/janus_credentials.dart';
 import '../models/sip_account.dart';
 
 /// rtc-relay 단말 등록 결과.
@@ -14,6 +15,7 @@ class DeviceRegistrationResult {
     required this.message,
     this.status = '',
     this.account,
+    this.janus = JanusCredentials.empty,
   });
 
   final bool ok;
@@ -26,6 +28,11 @@ class DeviceRegistrationResult {
   /// 서버가 배정한 SIP 자격. 없을 수 있다 — 번호를 받기 전에 승인된 옛 단말이나
   /// 숫자가 아닌 동/호인 세대다. 그 경우 SIP 착신만 못 쓰고 나머지는 그대로다.
   final SipAccount? account;
+
+  /// Janus 접속 정보. 단말마다 다른 토큰이 여기 실려 온다 — 이 값이 있으면
+  /// 사람이 API Secret 을 넣을 필요가 없다. 아직 안 내려주는 서버에서는 빈
+  /// 값이다.
+  final JanusCredentials janus;
 
   /// 승인은 났지만 아직 자리를 기다리는 중.
   bool get isPending => status == 'pending';
@@ -109,11 +116,15 @@ class DeviceRegistrationService {
 
       final status = (decoded?['status'] ?? '').toString();
       final account = SipAccount.fromJson(decoded?['sip']);
+      final janus = JanusCredentials.fromJson(
+        decoded == null ? const {} : Map<String, dynamic>.from(decoded),
+      );
       return DeviceRegistrationResult(
         ok: true,
         statusCode: response.statusCode,
         message: _successMessage(status, account),
         status: status,
+        janus: janus,
         account: account,
       );
     } catch (e) {

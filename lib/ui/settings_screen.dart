@@ -170,8 +170,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
                           controller: _apiSecret,
                           autocorrect: false,
                           decoration: InputDecoration(
-                            labelText: 'API Secret',
-                            helperText: '없으면 모든 요청이 403 으로 거절됩니다',
+                            labelText: 'API Secret (선택)',
+                            helperText: '서버가 단말 토큰을 내려주면 비워 두세요',
                             prefixIcon:
                                 const Icon(Icons.vpn_key_outlined, size: 20),
                             // 32자리 16진수를 손으로 치게 두지 않는다.
@@ -181,7 +181,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
                               onPressed: _pasteApiSecret,
                             ),
                           ),
-                          validator: (v) => _required(v, 'API Secret'),
+                          // 필수가 아니다. 서버가 승인 응답에 단말 토큰을 실어
+                          // 주므로, 이 칸은 아직 그러지 않는 서버를 위한
+                          // 임시 수단이다.
                         ),
                       ],
                     ),
