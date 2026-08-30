@@ -82,7 +82,10 @@ class _ConnectScreenState extends State<ConnectScreen> {
     // Janus 등록 만료는 10분이다. 앱이 사라진 뒤 그 시간이 지나야 Kamailio 가
     // "없음" 으로 보고 다시 푸시를 건다 — 그 사이 착신은 죽은 세션으로 간다.
     // 종료할 때 세션을 명시적으로 닫으면 그 창이 사라진다.
-    _lifecycle = AppLifecycleListener(onDetach: _service.disconnect);
+    _lifecycle = AppLifecycleListener(
+      onResume: _retryNow,
+      onDetach: _service.disconnect,
+    );
     PushService.enrollmentEvent.addListener(_onEnrollmentEvent);
     _watchNetwork();
     _bootstrap();
@@ -139,6 +142,18 @@ class _ConnectScreenState extends State<ConnectScreen> {
       if (!mounted || _service.hasCall) return;
       _enrollAndRegister(isRetry: true);
     });
+  }
+
+  /// 앱이 앞으로 돌아오면 밀려 있던 재시도를 앞당긴다.
+  ///
+  /// 백그라운드에서는 doze 가 타이머와 네트워크를 함께 묶어 둔다. 망이 바뀐 뒤
+  /// 실패한 재시도가 최대 2분까지 밀려 있을 수 있는데, 사용자가 앱을 열어 바로
+  /// 걸려는 순간이 하필 그 사이다. 기다리게 두지 않는다.
+  void _retryNow() {
+    if (_retry?.isActive != true) return;   // 실패해서 대기 중일 때만
+    if (_service.hasCall) return;
+    debugPrint('[등록] 앱이 앞으로 돌아와 재시도를 앞당깁니다');
+    _scheduleRetry(Duration.zero);
   }
 
   void _cancelRetry() {
