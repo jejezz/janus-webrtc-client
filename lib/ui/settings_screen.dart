@@ -42,6 +42,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
         : widget.initial.apiSecret,
   );
 
+  late bool _speakerByDefault = widget.initial.speakerByDefault;
+
   late String _complexId = widget.initial.complexId;
   late String _complexName = widget.initial.complexName;
   late String _complexHost = widget.initial.complexHost;
@@ -101,6 +103,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
       building: _building.text.trim(),
       unit: _unit.text.trim(),
       apiSecret: _apiSecret.text.trim(),
+      speakerByDefault: _speakerByDefault,
     );
     await _store.save(profile);
 
@@ -241,6 +244,33 @@ class _SettingsScreenState extends State<SettingsScreen> {
                             prefixIcon: Icon(Icons.mail_outline, size: 20),
                           ),
                           validator: (v) => _required(v, '이메일'),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  GlassCard(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        const SectionLabel('통화', icon: Icons.tune),
+                        const SizedBox(height: 6),
+                        SwitchListTile(
+                          value: _speakerByDefault,
+                          onChanged: (v) =>
+                              setState(() => _speakerByDefault = v),
+                          contentPadding: EdgeInsets.zero,
+                          title: const Text(
+                            '통화 시작 시 스피커',
+                            style: TextStyle(fontSize: 14),
+                          ),
+                          subtitle: const Text(
+                            '연결되면 스피커를 켜고, 통화가 끝나면 되돌립니다',
+                            style: TextStyle(
+                              fontSize: 11.5,
+                              color: Colors.white38,
+                            ),
+                          ),
                         ),
                       ],
                     ),

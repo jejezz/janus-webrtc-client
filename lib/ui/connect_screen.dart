@@ -135,6 +135,7 @@ class _ConnectScreenState extends State<ConnectScreen> {
 
     debugPrint('[등록] 자격 확보 user=${account.user} domain=${account.domain} '
         '→ Janus 등록 시작');
+    _service.speakerByDefault = _profile.speakerByDefault;
     await _service.connectAndRegister(
       serverUrl: _profile.janusUrl,
       apiSecret: _profile.apiSecret,
@@ -211,7 +212,11 @@ class _ConnectScreenState extends State<ConnectScreen> {
     _navigated = true;
     final exit = await Navigator.of(context).push<DialerExit>(
       MaterialPageRoute<DialerExit>(
-        builder: (_) => DialerScreen(service: _service),
+        builder: (_) => DialerScreen(
+          service: _service,
+          // 인터폰 앱에서 가장 자주 거는 곳은 우리 집 월패드다.
+          defaultCallee: _profile.wallpadNumber,
+        ),
       ),
     );
     if (!mounted) return;

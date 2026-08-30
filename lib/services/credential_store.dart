@@ -22,6 +22,7 @@ class DeviceProfile {
     required this.unit,
     required this.apiSecret,
     this.pushedJanusUrl = '',
+    this.speakerByDefault = true,
     this.sip,
   });
 
@@ -35,6 +36,7 @@ class DeviceProfile {
         unit = '',
         apiSecret = '',
         pushedJanusUrl = '',
+        speakerByDefault = true,
         sip = null;
 
   /// 서버가 단말을 가르는 열쇠. **한 번 만들면 바꾸지 않는다** — 바뀌면 서버에는
@@ -57,12 +59,29 @@ class DeviceProfile {
   /// 착신 푸시가 알려 준 Janus 주소. 비어 있으면 기본값을 쓴다.
   final String pushedJanusUrl;
 
+  /// 통화가 연결되면 스피커를 켤지. 인터폰은 손에 들지 않고 쓰는 일이 많아
+  /// 기본은 켬이다. 통화가 끝나면 원래대로 되돌린다.
+  final bool speakerByDefault;
+
   /// 등록 응답으로 받아 둔 SIP 자격. 없을 수 있다 — 번호를 받기 전에 승인된
   /// 옛 단말이거나 숫자가 아닌 동/호인 세대다.
   final SipAccount? sip;
 
   /// 서버가 받는 유일한 형태다.
   String get address => '${building.trim()}B${unit.trim()}U';
+
+  /// 우리 집 월패드 번호.
+  ///
+  /// 번호는 동4 + 호4 + 순번2 이고, 붙박이 장치(세대면 월패드)는 순번이 `00` 이다
+  /// (client-migration.md). 101동 805호 → `0101080500`.
+  ///
+  /// 동/호가 없으면 빈 문자열이다 — 그때는 화면이 기본값으로 떨어진다.
+  String get wallpadNumber {
+    final dong = building.trim();
+    final ho = unit.trim();
+    if (dong.isEmpty || ho.isEmpty) return '';
+    return '${dong.padLeft(4, '0')}${ho.padLeft(4, '0')}00';
+  }
 
   /// 단말 등록을 보낼 곳. **단지 호스트**에 있다.
   String get relayUrl => 'https://$complexHost${SipConfig.relayPath}';
@@ -94,6 +113,7 @@ class DeviceProfile {
     String? unit,
     String? apiSecret,
     String? pushedJanusUrl,
+    bool? speakerByDefault,
     SipAccount? sip,
   }) {
     return DeviceProfile(
@@ -106,6 +126,7 @@ class DeviceProfile {
       unit: unit ?? this.unit,
       apiSecret: apiSecret ?? this.apiSecret,
       pushedJanusUrl: pushedJanusUrl ?? this.pushedJanusUrl,
+      speakerByDefault: speakerByDefault ?? this.speakerByDefault,
       sip: sip ?? this.sip,
     );
   }
@@ -141,6 +162,7 @@ class CredentialStore {
   /// 있으므로 한 번 넘겨받는다 — 아니면 사용자가 32자리를 다시 쳐야 한다.
   static const _legacyApiSecret = 'sip.api_secret';
   static const _keyPushedJanus = 'janus.pushed_url';
+  static const _keySpeakerDefault = 'call.speaker_default';
   static const _keySipUser = 'sip.user';
   static const _keySipDomain = 'sip.domain';
   static const _keySipPassword = 'sip.password';
@@ -159,6 +181,7 @@ class CredentialStore {
       _storage.read(key: _keySipDomain),
       _storage.read(key: _keySipPassword),
       _storage.read(key: _keyPushedJanus),
+      _storage.read(key: _keySpeakerDefault),
     ]);
 
     // 새 키가 비었으면 옛 키를 본다.
@@ -185,6 +208,8 @@ class CredentialStore {
       unit: values[6] ?? '',
       apiSecret: apiSecret,
       pushedJanusUrl: values[11] ?? '',
+      // 저장된 적이 없으면 켬으로 둔다.
+      speakerByDefault: values[12] != 'false',
       sip: sipUser.isEmpty || sipDomain.isEmpty || sipPassword.isEmpty
           ? null
           : SipAccount(
@@ -206,6 +231,10 @@ class CredentialStore {
       _storage.write(key: _keyUnit, value: profile.unit),
       _storage.write(key: _keyApiSecret, value: profile.apiSecret),
       _storage.write(key: _keyPushedJanus, value: profile.pushedJanusUrl),
+      _storage.write(
+        key: _keySpeakerDefault,
+        value: profile.speakerByDefault ? 'true' : 'false',
+      ),
       _storage.write(key: _keySipUser, value: profile.sip?.user ?? ''),
       _storage.write(key: _keySipDomain, value: profile.sip?.domain ?? ''),
       _storage.write(key: _keySipPassword, value: profile.sip?.password ?? ''),

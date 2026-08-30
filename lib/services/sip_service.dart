@@ -99,6 +99,12 @@ class SipService extends ChangeNotifier {
   bool _needsMicPermission = false;
   bool get needsMicPermission => _needsMicPermission;
 
+  /// 통화가 연결되면 스피커를 켤지. 설정에서 온다.
+  bool speakerByDefault = true;
+
+  /// 통화 전 스피커 상태. 끝나면 여기로 되돌린다.
+  bool _speakerBeforeCall = false;
+
   /// 이번 hangup 을 실패로 보면 안 되는지.
   ///
   /// 통화가 붙었거나 사용자가 직접 끊거나 거절한 경우다. 내가 끊으면
@@ -317,6 +323,7 @@ class SipService extends ChangeNotifier {
         await _applyAnswer(sip, event.jsep);
         _connectedAt = DateTime.now();
         _expectedHangup = true;
+        await _applySpeakerDefault();
         _startStatsPolling();
         _setCall(CallState.active);
       } else if (data is SipMissedCallEvent) {
@@ -560,6 +567,7 @@ class SipService extends ChangeNotifier {
       _connectedAt = DateTime.now();
       _callTimeout?.cancel();
       _expectedHangup = true;
+      await _applySpeakerDefault();
       _startStatsPolling();
       _setCall(CallState.active);
     } catch (e) {
@@ -604,6 +612,19 @@ class SipService extends ChangeNotifier {
         '상대 단말이 통화 중으로 남아 다음 발신이 거절될 수 있습니다.\n'
         '${_describeSendFailure('원인', failure)}',
       );
+    }
+  }
+
+  /// 연결되면 스피커를 켠다. 인터폰은 손에 들지 않고 쓰는 일이 많다.
+  Future<void> _applySpeakerDefault() async {
+    _speakerBeforeCall = _speakerOn;
+    if (!speakerByDefault || _speakerOn) return;
+    try {
+      await Helper.setSpeakerphoneOn(true);
+      _speakerOn = true;
+      notifyListeners();
+    } catch (e) {
+      debugPrint('스피커 전환 실패: $e');
     }
   }
 
@@ -670,10 +691,10 @@ class SipService extends ChangeNotifier {
     _lastCallId = null;
     _connectedAt = null;
     _micMuted = false;
-    if (_speakerOn) {
-      _speakerOn = false;
+    if (_speakerOn != _speakerBeforeCall) {
+      _speakerOn = _speakerBeforeCall;
       try {
-        await Helper.setSpeakerphoneOn(false);
+        await Helper.setSpeakerphoneOn(_speakerBeforeCall);
       } catch (_) {
         // 통화가 이미 끝난 뒤라면 실패해도 무시한다.
       }

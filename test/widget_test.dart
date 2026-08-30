@@ -71,6 +71,24 @@ void main() {
       expect(profile.address, '101B805U');
     });
 
+    test('월패드 번호는 동4+호4+00 이다', () {
+      const profile = DeviceProfile(
+        uuid: 'u',
+        email: 'a@b.c',
+        complexId: 'c',
+        complexName: '단지',
+        complexHost: 'example.test',
+        building: '101',
+        unit: '805',
+        apiSecret: 's',
+      );
+      expect(profile.wallpadNumber, '0101080500');
+    });
+
+    test('동/호가 없으면 월패드 번호도 없다', () {
+      expect(const DeviceProfile.empty().wallpadNumber, isEmpty);
+    });
+
     test('릴레이는 단지 호스트, Janus 는 별도 호스트다', () {
       const profile = DeviceProfile(
         uuid: 'u',

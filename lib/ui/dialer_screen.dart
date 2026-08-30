@@ -26,17 +26,27 @@ enum DialerExit {
 
 /// 등록이 끝난 뒤의 화면. 발신과 착신 응답을 모두 여기서 처리한다.
 class DialerScreen extends StatefulWidget {
-  const DialerScreen({super.key, required this.service});
+  const DialerScreen({
+    super.key,
+    required this.service,
+    this.defaultCallee = '',
+  });
 
   final SipService service;
+
+  /// 미리 채워 둘 상대 번호. 우리 집 월패드를 향한다.
+  final String defaultCallee;
 
   @override
   State<DialerScreen> createState() => _DialerScreenState();
 }
 
 class _DialerScreenState extends State<DialerScreen> {
-  late final TextEditingController _callee =
-      TextEditingController(text: SipConfig.defaultCallee);
+  late final TextEditingController _callee = TextEditingController(
+    text: widget.defaultCallee.isNotEmpty
+        ? widget.defaultCallee
+        : SipConfig.defaultCallee,
+  );
 
   /// 통화 시간 표시를 1초마다 갱신한다.
   Timer? _ticker;
@@ -50,9 +60,10 @@ class _DialerScreenState extends State<DialerScreen> {
   /// 통화 중 키패드. DTMF 를 보내는 자리다 — 인터폰의 문 열기가 이걸로 동작한다.
   bool _inCallKeypad = false;
 
-  /// 입력칸 좌우에 같은 폭을 둬야 번호가 가운데에 선다.
+  /// 입력칸 좌우에 같은 폭을 둬야 번호가 가운데에 선다. 좁게 잡는다 — 양쪽에
+  /// 48 씩 두면 10자리 번호가 들어갈 자리가 모자라 잘린다.
   static const BoxConstraints _affixSize =
-      BoxConstraints(minWidth: 48, minHeight: 48);
+      BoxConstraints(minWidth: 40, minHeight: 40);
 
   @override
   void initState() {
@@ -258,16 +269,21 @@ class _DialerScreenState extends State<DialerScreen> {
                 keyboardType: TextInputType.text,
                 autocorrect: false,
                 textAlign: TextAlign.center,
+                // 내선은 10자리다(동4+호4+순번2). 자간과 크기를 그 폭에 맞춘다.
                 style: const TextStyle(
-                  fontSize: 30,
+                  fontSize: 26,
                   fontWeight: FontWeight.w600,
-                  letterSpacing: 4,
+                  letterSpacing: 2,
                 ),
                 decoration: InputDecoration(
-                  hintText: '1001',
+                  isDense: true,
+                  contentPadding: const EdgeInsets.symmetric(vertical: 14),
+                  hintText: widget.defaultCallee.isEmpty
+                      ? '0101080500'
+                      : widget.defaultCallee,
                   hintStyle: const TextStyle(
                     color: Colors.white24,
-                    letterSpacing: 4,
+                    letterSpacing: 2,
                   ),
                   // 지우기는 키패드를 접어도 쓸 수 있어야 하므로 입력칸에 붙인다.
                   suffixIcon: _buildBackspaceButton(),
