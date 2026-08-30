@@ -1,8 +1,9 @@
 import 'dart:convert';
 
+import 'package:flutter/foundation.dart';
+
 import 'package:http/http.dart' as http;
 
-import '../config/sip_config.dart';
 import '../models/sip_account.dart';
 
 /// rtc-relay 단말 등록 결과.
@@ -53,7 +54,7 @@ class DeviceRegistrationService {
     required String complex,
     required String address,
     required String fcmToken,
-    String? signalingUrl,
+    required String relayUrl,
   }) async {
     if (fcmToken.trim().isEmpty) {
       return const DeviceRegistrationResult(
@@ -64,8 +65,9 @@ class DeviceRegistrationService {
       );
     }
 
-    // 경로 끝의 /mobile 이 빠지면 404 다.
-    final url = SipConfig.deviceRegistrationUrl(signalingUrl: signalingUrl);
+    // 릴레이는 단지 호스트에 있다. Janus 주소에서 조립하면 안 된다 — 둘은
+    // 서로 다른 호스트이고 프로토콜도 다르다.
+    final url = relayUrl;
     final body = <String, dynamic>{
       'uuid': uuid,
       'email': email,
@@ -74,6 +76,7 @@ class DeviceRegistrationService {
       'token': fcmToken,
     };
 
+    debugPrint('[relay] POST $url  address=$address complex=$complex');
     try {
       final response = await _client
           .post(
@@ -83,18 +86,22 @@ class DeviceRegistrationService {
           )
           .timeout(const Duration(seconds: 15));
 
+      final text = response.body;
+      debugPrint('[relay] ${response.statusCode} '
+          '${text.length > 300 ? '${text.substring(0, 300)}…' : text}');
+
       final ok = response.statusCode >= 200 && response.statusCode < 300;
       if (!ok) {
         return DeviceRegistrationResult(
           ok: false,
           statusCode: response.statusCode,
-          message: _messageOf(response.body, response.statusCode),
+          message: _messageOf(text, response.statusCode),
         );
       }
 
       Map<String, dynamic>? decoded;
       try {
-        final parsed = jsonDecode(response.body);
+        final parsed = jsonDecode(text);
         if (parsed is Map<String, dynamic>) decoded = parsed;
       } catch (_) {
         // 본문이 JSON 이 아니어도 등록 자체는 성공이다.
@@ -110,6 +117,7 @@ class DeviceRegistrationService {
         account: account,
       );
     } catch (e) {
+      debugPrint('[relay] 요청 실패: $e');
       return DeviceRegistrationResult(
         ok: false,
         statusCode: 0,

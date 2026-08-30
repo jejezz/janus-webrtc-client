@@ -36,6 +36,14 @@ abstract final class PushService {
 
   static bool _available = false;
 
+  /// 승인 결과 푸시. 대기 화면이 이걸 듣고 스스로 다음으로 넘어간다.
+  ///
+  /// 서버는 승인·거절·만료를 `enroll.approved` / `enroll.rejected` /
+  /// `enroll.expired` 로 보낸다. 이걸 듣지 않으면 사용자가 "다시 확인" 을 눌러
+  /// 볼 때까지 대기 화면에 머문다.
+  static final ValueNotifier<String?> enrollmentEvent =
+      ValueNotifier<String?>(null);
+
   /// FCM 을 쓸 수 있는 상태인지. 설정 파일이 없으면 false 로 남는다.
   static bool get isAvailable => _available;
 
@@ -87,6 +95,13 @@ abstract final class PushService {
   }
 
   static Future<void> _onForegroundMessage(RemoteMessage message) async {
+    final method = (message.data['method'] ?? '').toString();
+    debugPrint('[push] $method ${message.data}');
+
+    if (method.startsWith('enroll.')) {
+      enrollmentEvent.value = method;
+      return;
+    }
     // 앱이 떠 있으면 이미 등록돼 있어 곧 incomingcall 이벤트가 온다.
     // 화면이 다른 곳에 가 있을 수 있으니 알림만 띄운다.
     await showIncomingCall(message);

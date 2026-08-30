@@ -63,12 +63,14 @@ class _ConnectScreenState extends State<ConnectScreen> {
     // "없음" 으로 보고 다시 푸시를 건다 — 그 사이 착신은 죽은 세션으로 간다.
     // 종료할 때 세션을 명시적으로 닫으면 그 창이 사라진다.
     _lifecycle = AppLifecycleListener(onDetach: _service.disconnect);
+    PushService.enrollmentEvent.addListener(_onEnrollmentEvent);
     _bootstrap();
   }
 
   @override
   void dispose() {
     _lifecycle.dispose();
+    PushService.enrollmentEvent.removeListener(_onEnrollmentEvent);
     _service.removeListener(_onServiceChanged);
     _service.dispose();
     _enrollment.dispose();
@@ -89,6 +91,32 @@ class _ConnectScreenState extends State<ConnectScreen> {
     }
   }
 
+  /// 월패드가 승인·거절했을 때. 승인 결과는 푸시로만 온다.
+  void _onEnrollmentEvent() {
+    final method = PushService.enrollmentEvent.value;
+    if (method == null || !mounted) return;
+    PushService.enrollmentEvent.value = null;
+    debugPrint('[등록] 승인 이벤트 $method');
+
+    switch (method) {
+      case 'enroll.approved':
+        // 승인됐으니 자격을 받으러 다시 간다.
+        _enrollAndRegister();
+      case 'enroll.rejected':
+        setState(() {
+          _pending = false;
+          _blocker = '월패드에서 이 단말의 등록을 거절했습니다.\n'
+              '세대와 이메일을 확인한 뒤 다시 요청하세요.';
+        });
+      case 'enroll.expired':
+        setState(() {
+          _pending = false;
+          _blocker = '30분 안에 승인되지 않아 요청이 사라졌습니다.\n'
+              '다시 요청해 주세요.';
+        });
+    }
+  }
+
   /// 자격을 받아 Janus 에 등록한다.
   Future<void> _enrollAndRegister() async {
     if (!_profile.isComplete || _enrolling) return;
@@ -99,11 +127,14 @@ class _ConnectScreenState extends State<ConnectScreen> {
       _enrolling = true;
     });
 
+    debugPrint('[등록] relay=${_profile.relayUrl} janus=${_profile.janusUrl}');
     final account = await _fetchAccount();
     if (!mounted) return;
     setState(() => _enrolling = false);
     if (account == null) return;   // 이유는 _blocker 에 담겼다
 
+    debugPrint('[등록] 자격 확보 user=${account.user} domain=${account.domain} '
+        '→ Janus 등록 시작');
     await _service.connectAndRegister(
       serverUrl: _profile.janusUrl,
       apiSecret: _profile.apiSecret,
@@ -114,6 +145,7 @@ class _ConnectScreenState extends State<ConnectScreen> {
   /// `/register/mobile` 로 SIP 자격을 받아 온다.
   Future<SipAccount?> _fetchAccount() async {
     final token = await PushService.token();
+    debugPrint('[등록] FCM 토큰 ${token == null ? '없음' : '확보(${token.length}자)'}');
     if (token == null) {
       // 이 호출은 저장된 토큰을 덮어쓴다. 빈 값을 보내면 그 단말의 푸시가 조용히
       // 끊기므로 아예 부르지 않는다.
@@ -131,7 +163,7 @@ class _ConnectScreenState extends State<ConnectScreen> {
       complex: _profile.complexId,
       address: _profile.address,
       fcmToken: token,
-      signalingUrl: _profile.janusUrl,
+      relayUrl: _profile.relayUrl,
     );
     if (!mounted) return null;
 
@@ -302,7 +334,8 @@ class _ConnectScreenState extends State<ConnectScreen> {
         StatusPill(
           tone: StatusTone.warning,
           icon: Icons.hourglass_bottom,
-          message: _blocker ?? '승인 대기 중입니다.',
+          message: '${_blocker ?? '승인 대기 중입니다.'}\n'
+              '승인되면 자동으로 넘어갑니다. 30분 안에 승인되지 않으면 요청이 사라집니다.',
         ),
         const SizedBox(height: 20),
         GlowButton(

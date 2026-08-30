@@ -65,13 +65,17 @@ class SipConfig {
   /// rtc-relay 단말 등록 주소.
   ///
   /// 시그널링과 같은 오리진에 있다. `wss://host:port/janus-ws` 에서
-  /// `https://host:port/rtc-relay/register/mobile` 을 만든다.
-  /// nginx 앞단의 경로 접두사는 배포마다 다르다. 이 저장소의 서버는
-  /// `/rtc-relay`, 마이그레이션 문서의 예시는 `/iot`, 포트에 직접 붙으면
-  /// 접두사가 없다. 값만 바꿔 맞춘다.
+  /// `https://host/relay/register/mobile` 을 만든다.
+  /// nginx 앞단의 경로 접두사는 배포마다 다르다. 단지 서버(`c-*.rtc.zoomon.art`)
+  /// 는 `/relay` 이고, 이 저장소가 쓰던 옛 개발 서버는 `/rtc-relay`, 마이그레이션
+  /// 문서의 예시는 `/iot`, 포트에 직접 붙으면 접두사가 없다.
+  ///
+  /// 어느 쪽인지는 빈 본문으로 찔러 보면 바로 안다 — 맞는 경로는 400 과 함께
+  /// "uuid, email, complex, address, token 은 필수입니다" 를 돌려주고, 아니면
+  /// nginx 가 404 를 준다.
   static const String relayPath = String.fromEnvironment(
     'RTC_RELAY_PATH',
-    defaultValue: '/rtc-relay/register/mobile',
+    defaultValue: '/relay/register/mobile',
   );
 
   static String deviceRegistrationUrl({String? signalingUrl}) {

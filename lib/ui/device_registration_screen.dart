@@ -77,7 +77,7 @@ class _DeviceRegistrationScreenState extends State<DeviceRegistrationScreen> {
       complex: _profile.complexId,
       address: _profile.address,
       fcmToken: token,
-      signalingUrl: _profile.janusUrl,
+      relayUrl: _profile.relayUrl,
     );
     if (result.account != null) await _store.saveSip(result.account);
 

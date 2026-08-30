@@ -17,7 +17,7 @@ class JanusConfig {
   /// 쓴다. 실기기라면 PC 의 LAN IP 를 넣는다.
   static const String defaultServerUrl = String.fromEnvironment(
     'JANUS_SERVER_URL',
-    defaultValue: 'wss://jejezzhome.iptime.org:28443/janus-ws',
+    defaultValue: 'wss://www.zoomon.art/janus-ws',
   );
 
   /// VideoRoom 기본 방 번호. janus.plugin.videoroom.jcfg 의 기본 방이 1234 다.

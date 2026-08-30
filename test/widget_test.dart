@@ -25,12 +25,12 @@ void main() {
       expect(
         SipConfig.deviceRegistrationUrl(
             signalingUrl: 'wss://example.test:28443/janus-ws'),
-        'https://example.test:28443/rtc-relay/register/mobile',
+        'https://example.test:28443/relay/register/mobile',
       );
       expect(
         SipConfig.deviceRegistrationUrl(
             signalingUrl: 'ws://192.168.0.9:8188/janus-ws'),
-        'http://192.168.0.9:8188/rtc-relay/register/mobile',
+        'http://192.168.0.9:8188/relay/register/mobile',
       );
     });
   });
@@ -69,7 +69,24 @@ void main() {
         apiSecret: 's',
       );
       expect(profile.address, '101B805U');
-      expect(profile.janusUrl, 'wss://example.test/janus-ws');
+    });
+
+    test('릴레이는 단지 호스트, Janus 는 별도 호스트다', () {
+      const profile = DeviceProfile(
+        uuid: 'u',
+        email: 'a@b.c',
+        complexId: 'c',
+        complexName: '단지',
+        complexHost: 'example.test',
+        building: '101',
+        unit: '805',
+        apiSecret: 's',
+      );
+      // 단말 등록은 단지 호스트로 간다.
+      expect(profile.relayUrl, 'https://example.test/relay/register/mobile');
+      // Janus 는 단지 호스트에서 조립하지 않는다 — 프로토콜이 다른 별개 서버다.
+      expect(profile.janusUrl, isNot(contains('example.test')));
+      expect(profile.janusUrl, endsWith('/janus-ws'));
     });
 
     test('SIP 자격은 완결 조건에 들어가지 않는다 — 등록해 봐야 받는 값이다', () {

@@ -2,6 +2,8 @@ import 'dart:math';
 
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
+import '../config/janus_config.dart';
+import '../config/sip_config.dart';
 import '../models/sip_account.dart';
 
 /// 이 단말이 누구인지, 그리고 서버가 배정해 준 SIP 자격.
@@ -19,6 +21,7 @@ class DeviceProfile {
     required this.building,
     required this.unit,
     required this.apiSecret,
+    this.pushedJanusUrl = '',
     this.sip,
   });
 
@@ -31,6 +34,7 @@ class DeviceProfile {
         building = '',
         unit = '',
         apiSecret = '',
+        pushedJanusUrl = '',
         sip = null;
 
   /// 서버가 단말을 가르는 열쇠. **한 번 만들면 바꾸지 않는다** — 바뀌면 서버에는
@@ -50,6 +54,9 @@ class DeviceProfile {
   /// Janus 의 api_secret. 단지 서버 구성에 딸린 값이라 사용자가 넣는다.
   final String apiSecret;
 
+  /// 착신 푸시가 알려 준 Janus 주소. 비어 있으면 기본값을 쓴다.
+  final String pushedJanusUrl;
+
   /// 등록 응답으로 받아 둔 SIP 자격. 없을 수 있다 — 번호를 받기 전에 승인된
   /// 옛 단말이거나 숫자가 아닌 동/호인 세대다.
   final SipAccount? sip;
@@ -57,19 +64,16 @@ class DeviceProfile {
   /// 서버가 받는 유일한 형태다.
   String get address => '${building.trim()}B${unit.trim()}U';
 
-  /// 단지 호스트에서 조립한 시그널링 주소.
+  /// 단말 등록을 보낼 곳. **단지 호스트**에 있다.
+  String get relayUrl => 'https://$complexHost${SipConfig.relayPath}';
+
+  /// Janus 시그널링 주소.
   ///
-  /// 단지 목록의 host 에는 **포트가 없다**(있으면 형식 오류로 버려진다). 즉 443
-  /// 을 전제로 한다. 포트가 다른 개발 서버로 붙어 볼 때는 아래 값을 넘긴다.
-  ///
-  /// ```
-  /// flutter run --dart-define=JANUS_URL=wss://호스트:28443/janus-ws
-  /// ```
-  String get janusUrl {
-    const override = String.fromEnvironment('JANUS_URL');
-    if (override.isNotEmpty) return override;
-    return 'wss://$complexHost/janus-ws';
-  }
+  /// **단지 호스트에서 조립하지 않는다.** 단지 호스트는 RTC 릴레이(`/relay/rtc`)
+  /// 가 사는 곳이고 그쪽은 프로토콜이 다르다. Janus 는 별도 호스트에 있으며,
+  /// 착신 푸시가 `janusUrl` 을 실어 보내면 그 값이 우선한다.
+  String get janusUrl =>
+      pushedJanusUrl.isNotEmpty ? pushedJanusUrl : JanusConfig.defaultServerUrl;
 
   /// 등록을 시도할 수 있는 상태인지. SIP 자격은 여기 들어가지 않는다 — 그건
   /// 등록해 봐야 받는 값이다.
@@ -89,6 +93,7 @@ class DeviceProfile {
     String? building,
     String? unit,
     String? apiSecret,
+    String? pushedJanusUrl,
     SipAccount? sip,
   }) {
     return DeviceProfile(
@@ -100,6 +105,7 @@ class DeviceProfile {
       building: building ?? this.building,
       unit: unit ?? this.unit,
       apiSecret: apiSecret ?? this.apiSecret,
+      pushedJanusUrl: pushedJanusUrl ?? this.pushedJanusUrl,
       sip: sip ?? this.sip,
     );
   }
@@ -130,6 +136,11 @@ class CredentialStore {
   static const _keyBuilding = 'device.building';
   static const _keyUnit = 'device.unit';
   static const _keyApiSecret = 'janus.api_secret';
+
+  /// 내선을 직접 입력하던 시절의 키. 그때 저장해 둔 API Secret 을 그대로 쓸 수
+  /// 있으므로 한 번 넘겨받는다 — 아니면 사용자가 32자리를 다시 쳐야 한다.
+  static const _legacyApiSecret = 'sip.api_secret';
+  static const _keyPushedJanus = 'janus.pushed_url';
   static const _keySipUser = 'sip.user';
   static const _keySipDomain = 'sip.domain';
   static const _keySipPassword = 'sip.password';
@@ -147,7 +158,17 @@ class CredentialStore {
       _storage.read(key: _keySipUser),
       _storage.read(key: _keySipDomain),
       _storage.read(key: _keySipPassword),
+      _storage.read(key: _keyPushedJanus),
     ]);
+
+    // 새 키가 비었으면 옛 키를 본다.
+    var apiSecret = values[7] ?? '';
+    if (apiSecret.isEmpty) {
+      apiSecret = await _storage.read(key: _legacyApiSecret) ?? '';
+      if (apiSecret.isNotEmpty) {
+        await _storage.write(key: _keyApiSecret, value: apiSecret);
+      }
+    }
 
     final sipUser = values[8] ?? '';
     final sipDomain = values[9] ?? '';
@@ -162,7 +183,8 @@ class CredentialStore {
       complexHost: values[4] ?? '',
       building: values[5] ?? '',
       unit: values[6] ?? '',
-      apiSecret: values[7] ?? '',
+      apiSecret: apiSecret,
+      pushedJanusUrl: values[11] ?? '',
       sip: sipUser.isEmpty || sipDomain.isEmpty || sipPassword.isEmpty
           ? null
           : SipAccount(
@@ -183,6 +205,7 @@ class CredentialStore {
       _storage.write(key: _keyBuilding, value: profile.building),
       _storage.write(key: _keyUnit, value: profile.unit),
       _storage.write(key: _keyApiSecret, value: profile.apiSecret),
+      _storage.write(key: _keyPushedJanus, value: profile.pushedJanusUrl),
       _storage.write(key: _keySipUser, value: profile.sip?.user ?? ''),
       _storage.write(key: _keySipDomain, value: profile.sip?.domain ?? ''),
       _storage.write(key: _keySipPassword, value: profile.sip?.password ?? ''),

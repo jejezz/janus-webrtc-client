@@ -1,4 +1,7 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+
+import '../config/janus_config.dart';
 
 import '../services/complex_directory.dart';
 import '../services/credential_store.dart';
@@ -31,7 +34,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
   late final _email = TextEditingController(text: widget.initial.email);
   late final _building = TextEditingController(text: widget.initial.building);
   late final _unit = TextEditingController(text: widget.initial.unit);
-  late final _apiSecret = TextEditingController(text: widget.initial.apiSecret);
+  // 빌드에 주입된 값이 있으면 그걸로 채운다
+  // (--dart-define=JANUS_API_SECRET=...).
+  late final _apiSecret = TextEditingController(
+    text: widget.initial.apiSecret.isEmpty
+        ? JanusConfig.defaultApiSecret
+        : widget.initial.apiSecret,
+  );
 
   late String _complexId = widget.initial.complexId;
   late String _complexName = widget.initial.complexName;
@@ -58,6 +67,19 @@ class _SettingsScreenState extends State<SettingsScreen> {
       _complexName = complex.name;
       _complexHost = complex.host;
     });
+  }
+
+  Future<void> _pasteApiSecret() async {
+    final data = await Clipboard.getData(Clipboard.kTextPlain);
+    final text = data?.text?.trim() ?? '';
+    if (!mounted) return;
+    if (text.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('클립보드가 비어 있습니다')),
+      );
+      return;
+    }
+    _apiSecret.text = text;
   }
 
   Future<void> _save() async {
@@ -144,10 +166,17 @@ class _SettingsScreenState extends State<SettingsScreen> {
                         TextFormField(
                           controller: _apiSecret,
                           autocorrect: false,
-                          decoration: const InputDecoration(
+                          decoration: InputDecoration(
                             labelText: 'API Secret',
                             helperText: '없으면 모든 요청이 403 으로 거절됩니다',
-                            prefixIcon: Icon(Icons.vpn_key_outlined, size: 20),
+                            prefixIcon:
+                                const Icon(Icons.vpn_key_outlined, size: 20),
+                            // 32자리 16진수를 손으로 치게 두지 않는다.
+                            suffixIcon: IconButton(
+                              tooltip: '붙여넣기',
+                              icon: const Icon(Icons.content_paste, size: 20),
+                              onPressed: _pasteApiSecret,
+                            ),
                           ),
                           validator: (v) => _required(v, 'API Secret'),
                         ),
