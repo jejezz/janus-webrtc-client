@@ -1,3 +1,6 @@
+import 'dart:async';
+
+import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:flutter/material.dart';
 
 import '../models/sip_account.dart';
@@ -49,6 +52,23 @@ class _ConnectScreenState extends State<ConnectScreen> {
   /// 401 재발급은 한 번만. 계속 401 이면 자격이 아니라 계정 문제다.
   bool _retriedAfter401 = false;
 
+  /// 망이 바뀌는 것을 지켜본다.
+  StreamSubscription<List<ConnectivityResult>>? _network;
+
+  /// 등록 실패 뒤 다시 붙어 보는 타이머.
+  Timer? _retry;
+
+  /// 연속 실패 횟수. 재시도 간격을 늘리는 데 쓴다.
+  int _retryCount = 0;
+
+  /// 재시도 간격. 지하철처럼 오래 끊기는 곳에서 계속 두드리지 않도록 늘린다.
+  static const List<Duration> _backoff = [
+    Duration(seconds: 5),
+    Duration(seconds: 15),
+    Duration(seconds: 45),
+    Duration(minutes: 2),
+  ];
+
   /// 등록까지 가지 못한 이유. 화면에 그대로 보여 준다.
   String? _blocker;
 
@@ -64,12 +84,15 @@ class _ConnectScreenState extends State<ConnectScreen> {
     // 종료할 때 세션을 명시적으로 닫으면 그 창이 사라진다.
     _lifecycle = AppLifecycleListener(onDetach: _service.disconnect);
     PushService.enrollmentEvent.addListener(_onEnrollmentEvent);
+    _watchNetwork();
     _bootstrap();
   }
 
   @override
   void dispose() {
     _lifecycle.dispose();
+    _network?.cancel();
+    _retry?.cancel();
     PushService.enrollmentEvent.removeListener(_onEnrollmentEvent);
     _service.removeListener(_onServiceChanged);
     _service.dispose();
@@ -89,6 +112,39 @@ class _ConnectScreenState extends State<ConnectScreen> {
     } else {
       _openSettings();
     }
+  }
+
+  /// 망이 바뀌면 다시 붙는다.
+  ///
+  /// Wi-Fi ↔ LTE 로 갈아타면 기존 WebSocket 은 죽는다. 그런데 죽은 것을 다음
+  /// 전송이 실패할 때까지 알 수 없어서, 그 사이 걸려온 전화를 통째로 놓친다.
+  /// 이동 중에는 흔한 일이라 착신이 조용히 죽는 가장 큰 원인이다.
+  void _watchNetwork() {
+    _network = Connectivity().onConnectivityChanged.listen((result) {
+      final online = result.any((r) => r != ConnectivityResult.none);
+      if (!online) return;   // 끊긴 것 자체로는 할 일이 없다
+      if (_service.hasCall) return;   // 통화 중에는 건드리지 않는다
+      debugPrint('[망] 전환 감지 $result — 다시 등록한다');
+      // 새 망이 자리를 잡을 틈을 준다. 곧바로 붙으면 주소를 못 얻는다.
+      _scheduleRetry(const Duration(seconds: 2), reset: true);
+    });
+  }
+
+  /// 실패했을 때 스스로 다시 붙는다. 사용자가 버튼을 누를 때까지 기다리면
+  /// 지하철에서 한 번 실패한 뒤 나와도 계속 미등록으로 남는다.
+  void _scheduleRetry(Duration delay, {bool reset = false}) {
+    _retry?.cancel();
+    if (reset) _retryCount = 0;
+    _retry = Timer(delay, () {
+      if (!mounted || _service.hasCall) return;
+      _enrollAndRegister(isRetry: true);
+    });
+  }
+
+  void _cancelRetry() {
+    _retry?.cancel();
+    _retry = null;
+    _retryCount = 0;
   }
 
   /// 월패드가 승인·거절했을 때. 승인 결과는 푸시로만 온다.
@@ -118,8 +174,9 @@ class _ConnectScreenState extends State<ConnectScreen> {
   }
 
   /// 자격을 받아 Janus 에 등록한다.
-  Future<void> _enrollAndRegister() async {
+  Future<void> _enrollAndRegister({bool isRetry = false}) async {
     if (!_profile.isComplete || _enrolling) return;
+    if (!isRetry) _cancelRetry();
     setState(() {
       _manual = false;
       _pending = false;
@@ -131,7 +188,11 @@ class _ConnectScreenState extends State<ConnectScreen> {
     final account = await _fetchAccount();
     if (!mounted) return;
     setState(() => _enrolling = false);
-    if (account == null) return;   // 이유는 _blocker 에 담겼다
+    if (account == null) {
+      // 이유는 _blocker 에 담겼다. 승인 대기는 푸시로 풀리므로 두드리지 않는다.
+      if (!_pending) _armBackoff();
+      return;
+    }
 
     debugPrint('[등록] 자격 확보 user=${account.user} domain=${account.domain} '
         '→ Janus 등록 시작');
@@ -206,8 +267,13 @@ class _ConnectScreenState extends State<ConnectScreen> {
       return;
     }
 
+    if (_service.registrationState == SipRegistrationState.failed) {
+      _armBackoff();
+    }
+
     if (_navigated || !_service.isRegistered) return;
     _retriedAfter401 = false;
+    _cancelRetry();
 
     _navigated = true;
     final exit = await Navigator.of(context).push<DialerExit>(
@@ -227,6 +293,15 @@ class _ConnectScreenState extends State<ConnectScreen> {
       return;
     }
     setState(() => _manual = true);
+  }
+
+  /// 다음 재시도를 예약한다. 간격은 실패가 이어질수록 늘어난다.
+  void _armBackoff() {
+    if (_retry?.isActive == true) return;
+    final delay = _backoff[_retryCount.clamp(0, _backoff.length - 1)];
+    _retryCount++;
+    debugPrint('[등록] ${delay.inSeconds}초 뒤 다시 시도합니다 ($_retryCount번째)');
+    _scheduleRetry(delay);
   }
 
   Future<void> _openSettings() async {
@@ -359,7 +434,9 @@ class _ConnectScreenState extends State<ConnectScreen> {
         StatusPill(
           tone: StatusTone.danger,
           icon: Icons.error_outline,
-          message: blocker ?? _service.errorMessage ?? '등록에 실패했습니다',
+          message: '${blocker ?? _service.errorMessage ?? '등록에 실패했습니다'}'
+              // 가만히 두면 알아서 다시 붙는다는 것을 알려 준다.
+              '${_retry?.isActive == true ? '\n\n자동으로 다시 시도합니다. 망이 바뀌면 곧바로 붙습니다.' : ''}',
         ),
         const SizedBox(height: 20),
         GlowButton(
