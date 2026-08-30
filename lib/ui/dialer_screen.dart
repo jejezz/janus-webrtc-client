@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_webrtc/flutter_webrtc.dart';
+import 'package:flutter/services.dart';
 import 'package:permission_handler/permission_handler.dart';
 
 import '../config/sip_config.dart';
@@ -10,6 +11,7 @@ import 'device_registration_screen.dart';
 import 'theme/app_theme.dart';
 import 'widgets/aurora_background.dart';
 import 'widgets/glass.dart';
+import 'widgets/dial_pad.dart';
 import 'widgets/janus_mark.dart';
 import 'widgets/pulse_avatar.dart';
 
@@ -42,6 +44,16 @@ class _DialerScreenState extends State<DialerScreen> {
   /// 중복 pop 을 막는다.
   bool _leaving = false;
 
+  /// 키패드를 펼쳐 둘지. 전화 거는 화면이므로 기본은 펼침이다.
+  bool _keypadOpen = true;
+
+  /// 통화 중 키패드. DTMF 를 보내는 자리다 — 인터폰의 문 열기가 이걸로 동작한다.
+  bool _inCallKeypad = false;
+
+  /// 입력칸 좌우에 같은 폭을 둬야 번호가 가운데에 선다.
+  static const BoxConstraints _affixSize =
+      BoxConstraints(minWidth: 48, minHeight: 48);
+
   @override
   void initState() {
     super.initState();
@@ -65,9 +77,65 @@ class _DialerScreenState extends State<DialerScreen> {
   /// 다시 붙게 한다.
   void _onServiceChanged() {
     if (!mounted || _leaving) return;
+    if (_inCallKeypad && widget.service.callState != CallState.active) {
+      setState(() => _inCallKeypad = false);
+    }
     if (widget.service.registrationState != SipRegistrationState.failed) return;
     _leaving = true;
     Navigator.of(context).pop(DialerExit.connectionLost);
+  }
+
+  void _appendDigit(String digit) {
+    // 통화 중에는 같은 키패드가 DTMF 를 보낸다.
+    if (widget.service.callState == CallState.active) {
+      widget.service.sendDtmf(digit);
+      return;
+    }
+    _callee.text += digit;
+    setState(() {});
+  }
+
+  void _backspace() {
+    if (_callee.text.isEmpty) return;
+    _callee.text = _callee.text.substring(0, _callee.text.length - 1);
+    setState(() {});
+  }
+
+  void _clearCallee() {
+    if (_callee.text.isEmpty) return;
+    _callee.clear();
+    setState(() {});
+  }
+
+  /// 입력칸 오른쪽 지우기 버튼.
+  ///
+  /// 키패드를 접든 펼치든 항상 자리에 있다. 지울 것이 없으면 흐리게 두어 눌러도
+  /// 아무 일도 일어나지 않는다는 것을 보여 준다. 길게 누르면 전부 지운다.
+  Widget _buildBackspaceButton() {
+    return ValueListenableBuilder<TextEditingValue>(
+      valueListenable: _callee,
+      builder: (context, value, _) {
+        final hasText = value.text.isNotEmpty;
+        return IconButton(
+          tooltip: '지우기',
+          onPressed: hasText
+              ? () {
+                  HapticFeedback.selectionClick();
+                  _backspace();
+                }
+              : null,
+          onLongPress: hasText
+              ? () {
+                  HapticFeedback.mediumImpact();
+                  _clearCallee();
+                }
+              : null,
+          icon: const Icon(Icons.backspace_outlined, size: 22),
+          color: Colors.white54,
+          disabledColor: Colors.white24,
+        );
+      },
+    );
   }
 
   Future<void> _hangUpAndLeave() async {
@@ -148,15 +216,43 @@ class _DialerScreenState extends State<DialerScreen> {
               : 'SIP 등록 대기 중',
         ),
         Expanded(child: _centered([
-          const Center(child: JanusMark(width: 150)),
-          const SizedBox(height: 28),
+          // 키패드를 펼치면 마크가 자리를 내준다. 둘 다 넣으면 화면을 넘친다.
+          AnimatedSize(
+            duration: const Duration(milliseconds: 200),
+            curve: Curves.easeOut,
+            child: _keypadOpen
+                ? const SizedBox(width: double.infinity, height: 8)
+                : const Padding(
+                    padding: EdgeInsets.only(bottom: 28),
+                    child: Center(child: JanusMark(width: 150)),
+                  ),
+          ),
           GlassCard(
           padding: const EdgeInsets.fromLTRB(20, 20, 20, 24),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              const SectionLabel('상대 번호', icon: Icons.dialpad),
-              const SizedBox(height: 18),
+              Row(
+                children: [
+                  const Expanded(
+                    child: SectionLabel('상대 번호', icon: Icons.dialpad),
+                  ),
+                  IconButton(
+                    tooltip: _keypadOpen ? '키패드 접기' : '키패드 펼치기',
+                    visualDensity: VisualDensity.compact,
+                    icon: Icon(
+                      _keypadOpen
+                          ? Icons.keyboard_arrow_down
+                          : Icons.keyboard_arrow_up,
+                      size: 20,
+                      color: Colors.white54,
+                    ),
+                    onPressed: () =>
+                        setState(() => _keypadOpen = !_keypadOpen),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 12),
               TextField(
                 controller: _callee,
                 keyboardType: TextInputType.text,
@@ -167,9 +263,18 @@ class _DialerScreenState extends State<DialerScreen> {
                   fontWeight: FontWeight.w600,
                   letterSpacing: 4,
                 ),
-                decoration: const InputDecoration(
+                decoration: InputDecoration(
                   hintText: '1001',
-                  hintStyle: TextStyle(color: Colors.white24, letterSpacing: 4),
+                  hintStyle: const TextStyle(
+                    color: Colors.white24,
+                    letterSpacing: 4,
+                  ),
+                  // 지우기는 키패드를 접어도 쓸 수 있어야 하므로 입력칸에 붙인다.
+                  suffixIcon: _buildBackspaceButton(),
+                  suffixIconConstraints: _affixSize,
+                  // 오른쪽 버튼만큼 번호가 왼쪽으로 밀리지 않게 폭을 비워 둔다.
+                  prefixIcon: const SizedBox.shrink(),
+                  prefixIconConstraints: _affixSize,
                 ),
               ),
               const SizedBox(height: 12),
@@ -177,6 +282,16 @@ class _DialerScreenState extends State<DialerScreen> {
                 '내선 번호 또는 sip: 로 시작하는 전체 URI',
                 textAlign: TextAlign.center,
                 style: TextStyle(fontSize: 12, color: Colors.white38),
+              ),
+              AnimatedSize(
+                duration: const Duration(milliseconds: 200),
+                curve: Curves.easeOut,
+                child: _keypadOpen
+                    ? Padding(
+                        padding: const EdgeInsets.only(top: 18),
+                        child: DialPad(onDigit: _appendDigit),
+                      )
+                    : const SizedBox(width: double.infinity),
               ),
             ],
           ),
@@ -274,6 +389,14 @@ class _DialerScreenState extends State<DialerScreen> {
       connected: true,
       actions: [
         CircleActionButton(
+          onPressed: () =>
+              setState(() => _inCallKeypad = !_inCallKeypad),
+          color: _inCallKeypad ? AppPalette.cyan : Colors.white70,
+          filled: false,
+          icon: Icons.dialpad,
+          label: '키패드',
+        ),
+        CircleActionButton(
           onPressed: service.toggleMic,
           color: service.micMuted ? AppPalette.warning : AppPalette.cyan,
           filled: false,
@@ -342,7 +465,21 @@ class _DialerScreenState extends State<DialerScreen> {
             ),
           ),
           const SizedBox(height: 28),
-          _buildDiagnostics(context),
+          // 통화 중 키패드를 펼치면 진단 카드 자리를 대신 쓴다. 둘 다 넣으면
+          // 화면을 넘치고, 통화 중에 동시에 볼 이유도 없다.
+          if (connected && _inCallKeypad)
+            GlassCard(
+              radius: 20,
+              child: Column(
+                children: [
+                  const SectionLabel('DTMF', icon: Icons.dialpad),
+                  const SizedBox(height: 16),
+                  DialPad(onDigit: _appendDigit, keySize: 58),
+                ],
+              ),
+            )
+          else
+            _buildDiagnostics(context),
         ])),
         const SizedBox(height: 20),
         Row(

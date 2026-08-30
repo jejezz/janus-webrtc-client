@@ -599,6 +599,20 @@ class SipService extends ChangeNotifier {
     }
   }
 
+  /// 통화 중 DTMF 를 보낸다. 인터폰의 문 열기 같은 기능이 이걸로 동작한다.
+  ///
+  /// janus_client 의 SIP 래퍼에는 DTMF 가 없어 Janus 요청을 직접 보낸다.
+  /// janus.plugin.sip 의 `dtmf_info` 는 SIP INFO 로 나간다.
+  Future<void> sendDtmf(String digit) async {
+    final sip = _sip;
+    if (sip == null || _callState != CallState.active) return;
+    try {
+      await sip.send(data: {'request': 'dtmf_info', 'digit': digit});
+    } catch (e) {
+      debugPrint('DTMF 전송 실패: $e');
+    }
+  }
+
   void toggleMic() {
     _micMuted = !_micMuted;
     _applyMicState();
