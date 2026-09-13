@@ -49,6 +49,22 @@ dependencies:
   cloud_firestore: ^6.9.0
   connectivity_plus: ^7.3.1
 
+# 안드로이드 H.264 수신 프로파일 때문에 포크를 쓴다. saturn-mobile-client-flutter
+# 와 같은 포크·같은 커밋이다 (그쪽 flutter-webrtc-fork.md 에 경위가 있다).
+#
+# 원본 flutter_webrtc 는 디코더를 찾기만 하고 `CodecCapabilities.profileLevels`
+# 를 읽지 않아 Constrained Baseline(packetization-mode=1) 하나만 SDP 에 광고한다.
+# 그래서 월패드·공동현관기·kamailio-sip-client(pjsip) 처럼 Baseline 이나 mode 0
+# 으로 내미는 상대는 하드웨어가 디코딩할 수 있는데도 영상 m-line 이 통째로
+# 거절된다. 빌드는 멀쩡히 되고 통화를 해 봐야 드러나므로 test/ 에서 지킨다.
+#
+# ref 는 브랜치가 아니라 커밋으로 박는다. 브랜치는 움직인다.
+dependency_overrides:
+  flutter_webrtc:
+    git:
+      url: https://github.com/jejezz/flutter_webrtc.git
+      ref: e09b0d7e4c759d95a086cf2e33be84235985707e
+
 dev_dependencies:
   flutter_test:
     sdk: flutter

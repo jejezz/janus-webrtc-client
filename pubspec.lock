@@ -323,10 +323,11 @@ packages:
   flutter_webrtc:
     dependency: "direct main"
     description:
-      name: flutter_webrtc
-      sha256: e997161d7da3adedd3d430691b20931b0b4d96fa48bb60938d9ba0bf6fca98be
-      url: "https://pub.dev"
-    source: hosted
+      path: "."
+      ref: e09b0d7e4c759d95a086cf2e33be84235985707e
+      resolved-ref: e09b0d7e4c759d95a086cf2e33be84235985707e
+      url: "https://github.com/jejezz/flutter_webrtc.git"
+    source: git
     version: "1.6.0"
   http:
     dependency: "direct main"
