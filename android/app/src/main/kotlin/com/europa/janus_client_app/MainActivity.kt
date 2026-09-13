@@ -15,7 +15,11 @@ class MainActivity : FlutterActivity() {
         ).setMethodCallHandler { call, result ->
             when (call.method) {
                 "start" -> {
-                    CallForegroundService.start(this, call.argument<String>("peer"))
+                    CallForegroundService.start(
+                        this,
+                        call.argument<String>("peer"),
+                        call.argument<Boolean>("video") ?: false,
+                    )
                     result.success(null)
                 }
                 "stop" -> {

@@ -123,6 +123,13 @@ class _DialerScreenState extends State<DialerScreen> {
     setState(() {});
   }
 
+  void _dial({required bool video}) {
+    final target = _callee.text.trim();
+    if (target.isEmpty) return;
+    FocusScope.of(context).unfocus();
+    widget.service.call(target, video: video);
+  }
+
   /// 입력칸 오른쪽 지우기 버튼.
   ///
   /// 키패드를 접든 펼치든 항상 자리에 있다. 지울 것이 없으면 흐리게 두어 눌러도
@@ -318,16 +325,25 @@ class _DialerScreenState extends State<DialerScreen> {
           ),
         ),
           const SizedBox(height: 24),
-          GlowButton(
-            label: '전화 걸기',
-            icon: Icons.call,
-            gradient: AppPalette.liveGradient,
-            onPressed: () {
-              final target = _callee.text.trim();
-              if (target.isEmpty) return;
-              FocusScope.of(context).unfocus();
-              widget.service.call(target);
-            },
+          Row(
+            children: [
+              Expanded(
+                child: GlowButton(
+                  label: '음성 통화',
+                  icon: Icons.call,
+                  gradient: AppPalette.liveGradient,
+                  onPressed: () => _dial(video: false),
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: GlowButton(
+                  label: '영상 통화',
+                  icon: Icons.videocam,
+                  onPressed: () => _dial(video: true),
+                ),
+              ),
+            ],
           ),
         ])),
         if (service.errorMessage != null) ...[
@@ -376,22 +392,34 @@ class _DialerScreenState extends State<DialerScreen> {
   // -------------------------------------------------------------- 착신
 
   Widget _buildIncoming(BuildContext context) {
+    final service = widget.service;
+    final video = service.incomingHasVideo;
     return _buildCallLayout(
       context,
-      title: widget.service.peer ?? '',
-      subtitle: '걸려온 전화',
+      title: service.peer ?? '',
+      subtitle: video ? '걸려온 영상 통화' : '걸려온 전화',
       accent: AppPalette.pink,
       actions: [
         CircleActionButton(
-          onPressed: () => widget.service.declineCall(),
+          onPressed: () => service.declineCall(),
           color: AppPalette.danger,
           icon: Icons.call_end,
           label: '거절',
         ),
+        // 상대가 영상을 실어 보냈을 때만 고를 수 있다. 음성으로 받으면 내
+        // 카메라는 켜지 않되 상대 영상은 그대로 보인다.
+        if (video)
+          CircleActionButton(
+            onPressed: () => service.acceptCall(video: false),
+            color: AppPalette.cyan,
+            filled: false,
+            icon: Icons.call,
+            label: '음성만',
+          ),
         CircleActionButton(
-          onPressed: widget.service.acceptCall,
+          onPressed: () => service.acceptCall(),
           color: AppPalette.success,
-          icon: Icons.call,
+          icon: video ? Icons.videocam : Icons.call,
           label: '받기',
         ),
       ],
@@ -402,18 +430,23 @@ class _DialerScreenState extends State<DialerScreen> {
 
   Widget _buildActive(BuildContext context) {
     final service = widget.service;
+    final video = service.isVideoCall;
+    // 영상 통화는 버튼이 여섯이라 한 줄에 다 넣으려면 작아야 한다.
+    final size = video ? 54.0 : 66.0;
     return _buildCallLayout(
       context,
       title: service.peer ?? '',
       subtitle: _formatDuration(service.connectedAt),
       accent: AppPalette.success,
       connected: true,
+      video: video,
       actions: [
         CircleActionButton(
           onPressed: () =>
               setState(() => _inCallKeypad = !_inCallKeypad),
           color: _inCallKeypad ? AppPalette.cyan : Colors.white70,
           filled: false,
+          size: size,
           icon: Icons.dialpad,
           label: '키패드',
         ),
@@ -421,19 +454,40 @@ class _DialerScreenState extends State<DialerScreen> {
           onPressed: service.toggleMic,
           color: service.micMuted ? AppPalette.warning : AppPalette.cyan,
           filled: false,
+          size: size,
           icon: service.micMuted ? Icons.mic_off : Icons.mic,
           label: service.micMuted ? '음소거 중' : '마이크',
         ),
+        if (service.localVideo) ...[
+          CircleActionButton(
+            onPressed: service.toggleCamera,
+            color: service.cameraOff ? AppPalette.warning : AppPalette.cyan,
+            filled: false,
+            size: size,
+            icon: service.cameraOff ? Icons.videocam_off : Icons.videocam,
+            label: service.cameraOff ? '카메라 꺼짐' : '카메라',
+          ),
+          CircleActionButton(
+            onPressed: service.switchCamera,
+            color: Colors.white70,
+            filled: false,
+            size: size,
+            icon: Icons.cameraswitch_outlined,
+            label: '전환',
+          ),
+        ],
         CircleActionButton(
           onPressed: service.toggleSpeaker,
           color: service.speakerOn ? AppPalette.cyan : Colors.white70,
           filled: false,
+          size: size,
           icon: service.speakerOn ? Icons.volume_up : Icons.hearing,
           label: service.speakerOn ? '스피커' : '수화기',
         ),
         CircleActionButton(
           onPressed: service.hangup,
           color: AppPalette.danger,
+          size: size,
           icon: Icons.call_end,
           label: '끊기',
         ),
@@ -458,7 +512,40 @@ class _DialerScreenState extends State<DialerScreen> {
     required Color accent,
     required List<Widget> actions,
     bool connected = false,
+    bool video = false,
   }) {
+    // 버튼이 많아지면 한 줄에 못 들어가는 폭이 있다. 넘치면 다음 줄로 흘린다.
+    final actionBar = Wrap(
+      alignment: WrapAlignment.center,
+      spacing: 14,
+      runSpacing: 12,
+      children: actions,
+    );
+
+    if (video) {
+      // 영상은 남는 자리를 전부 차지한다. 진단 카드 대신 코덱 한 줄만 아래에
+      // 붙인다 — 영상이 안 보일 때 H.264 협상 여부가 첫 단서다.
+      return Column(
+        children: [
+          Expanded(
+            child: _buildVideoPane(context, title: title, subtitle: subtitle),
+          ),
+          const SizedBox(height: 12),
+          if (_inCallKeypad)
+            GlassCard(
+              radius: 20,
+              padding: const EdgeInsets.fromLTRB(20, 12, 20, 12),
+              child: DialPad(onDigit: _appendDigit, keySize: 48),
+            )
+          else
+            _buildVideoStrip(),
+          const SizedBox(height: 16),
+          actionBar,
+          const SizedBox(height: 12),
+        ],
+      );
+    }
+
     return Column(
       children: [
         // 통화가 붙으면 진단 카드에 줄이 늘어난다. Spacer 로만 짜면 그때
@@ -503,14 +590,146 @@ class _DialerScreenState extends State<DialerScreen> {
             _buildDiagnostics(context),
         ])),
         const SizedBox(height: 20),
-        Row(
-          mainAxisAlignment: actions.length == 1
-              ? MainAxisAlignment.center
-              : MainAxisAlignment.spaceEvenly,
-          children: actions,
-        ),
+        actionBar,
         const SizedBox(height: 16),
       ],
+    );
+  }
+
+  // -------------------------------------------------------------- 영상 화면
+
+  /// 상대 영상을 크게, 내 카메라를 구석에 작게 겹친다.
+  ///
+  /// 상대가 영상 없이 받았으면(음성 answer) 원격 자리에 아바타를 두고 내
+  /// 카메라만 보여 준다. 그 반대(내 카메라 없이 상대 영상만)도 있다 —
+  /// 인터폰 카메라를 보는 경우다.
+  Widget _buildVideoPane(
+    BuildContext context, {
+    required String title,
+    required String subtitle,
+  }) {
+    final service = widget.service;
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(24),
+      child: Container(
+        decoration: BoxDecoration(
+          color: const Color(0xFF0A0F22),
+          border: Border.all(color: AppPalette.glassStroke),
+          borderRadius: BorderRadius.circular(24),
+        ),
+        child: Stack(
+          fit: StackFit.expand,
+          children: [
+            if (service.remoteVideo)
+              RTCVideoView(
+                service.remoteRenderer,
+                objectFit: RTCVideoViewObjectFit.RTCVideoViewObjectFitCover,
+              )
+            else
+              Center(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const PulseAvatar(color: AppPalette.success, animate: false),
+                    const SizedBox(height: 12),
+                    Text(
+                      service.localVideo ? '상대 영상 없음' : '영상 대기 중',
+                      style: const TextStyle(color: Colors.white54),
+                    ),
+                  ],
+                ),
+              ),
+            // 상대 번호와 통화 시간. 영상 위에 얹히므로 어두운 띠를 깐다.
+            Positioned(
+              left: 0,
+              right: 0,
+              top: 0,
+              child: Container(
+                padding: const EdgeInsets.fromLTRB(16, 12, 16, 18),
+                decoration: const BoxDecoration(
+                  gradient: LinearGradient(
+                    begin: Alignment.topCenter,
+                    end: Alignment.bottomCenter,
+                    colors: [Color(0xB3000000), Color(0x00000000)],
+                  ),
+                ),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        title,
+                        style: const TextStyle(
+                          fontSize: 20,
+                          fontWeight: FontWeight.w700,
+                        ),
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                    Text(
+                      subtitle,
+                      style: const TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.w600,
+                        color: AppPalette.success,
+                        letterSpacing: 1.2,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            if (service.localVideo)
+              Positioned(
+                right: 12,
+                bottom: 12,
+                width: 108,
+                height: 144,
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(14),
+                  child: Container(
+                    decoration: BoxDecoration(
+                      color: Colors.black54,
+                      border: Border.all(
+                        color: AppPalette.cyan.withValues(alpha: 0.55),
+                      ),
+                      borderRadius: BorderRadius.circular(14),
+                    ),
+                    child: service.cameraOff
+                        ? const Center(
+                            child: Icon(Icons.videocam_off,
+                                color: Colors.white54),
+                          )
+                        : RTCVideoView(
+                            service.localRenderer,
+                            mirror: true,
+                            objectFit:
+                                RTCVideoViewObjectFit.RTCVideoViewObjectFitCover,
+                          ),
+                  ),
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// 영상 통화 중 진단 한 줄. 카드 전체를 넣을 자리가 없다.
+  Widget _buildVideoStrip() {
+    final d = widget.service.diagnostics;
+    final audio = d.audioCodec == null
+        ? '오디오 대기'
+        : (d.isG711 ? d.audioCodec! : '${d.audioCodec!} (G.711 아님)');
+    final video = d.videoCodec == null
+        ? '영상 협상 안 됨'
+        : (d.isH264 ? d.videoCodec! : '${d.videoCodec!} (H.264 아님)');
+    final ok = d.isG711 && (d.videoCodec == null || d.isH264);
+    return StatusPill(
+      tone: ok ? StatusTone.success : StatusTone.warning,
+      icon: Icons.insights_outlined,
+      message:
+          '$audio · $video · ↑${_kb(d.bytesSent + d.videoBytesSent)} '
+          '↓${_kb(d.bytesReceived + d.videoBytesReceived)}',
     );
   }
 
@@ -588,6 +807,12 @@ class _DialerScreenState extends State<DialerScreen> {
             _diagRow('왕복', '${d.rttMs} ms', ok: d.rttMs! < 300),
           _diagRow('원격 트랙', d.remoteTrackArrived ? '수신됨' : '없음',
               ok: d.remoteTrackArrived),
+          if (d.videoCodec != null)
+            _diagRow(
+              '영상',
+              '${d.videoCodec}  ↑${_kb(d.videoBytesSent)} ↓${_kb(d.videoBytesReceived)}',
+              ok: d.isH264,
+            ),
           if (d.hasRemoteDescription)
             _diagRow(
               'SDP 방향',

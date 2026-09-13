@@ -7,6 +7,7 @@ import android.app.PendingIntent
 import android.app.Service
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.content.pm.ServiceInfo
 import android.os.Build
 import android.os.IBinder
@@ -29,10 +30,12 @@ class CallForegroundService : Service() {
         private const val CHANNEL_ID = "janus_call"
         private const val NOTIFICATION_ID = 1001
         const val EXTRA_PEER = "peer"
+        const val EXTRA_VIDEO = "video"
 
-        fun start(context: Context, peer: String?) {
+        fun start(context: Context, peer: String?, video: Boolean) {
             val intent = Intent(context, CallForegroundService::class.java)
                 .putExtra(EXTRA_PEER, peer)
+                .putExtra(EXTRA_VIDEO, video)
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                 context.startForegroundService(intent)
             } else {
@@ -52,12 +55,17 @@ class CallForegroundService : Service() {
         val notification = buildNotification(intent?.getStringExtra(EXTRA_PEER))
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            // 유형을 붙여야 통화 중에도 마이크 접근이 유지된다.
-            startForeground(
-                NOTIFICATION_ID,
-                notification,
-                ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE,
-            )
+            // 유형을 붙여야 통화 중에도 마이크 접근이 유지된다. 영상 통화면
+            // camera 도 더한다 — 단 권한이 없는 채로 camera 유형을 요청하면
+            // 안드로이드 14+ 가 SecurityException 을 던져 앱이 죽으므로 확인한다.
+            var type = ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
+            val video = intent?.getBooleanExtra(EXTRA_VIDEO, false) == true
+            val cameraGranted = checkSelfPermission(android.Manifest.permission.CAMERA) ==
+                PackageManager.PERMISSION_GRANTED
+            if (video && cameraGranted) {
+                type = type or ServiceInfo.FOREGROUND_SERVICE_TYPE_CAMERA
+            }
+            startForeground(NOTIFICATION_ID, notification, type)
         } else {
             startForeground(NOTIFICATION_ID, notification)
         }

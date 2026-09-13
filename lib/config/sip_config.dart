@@ -42,12 +42,24 @@ class SipConfig {
   /// Janus 세션 타임아웃이 60초다. 그보다 넉넉히 짧게 keepalive 를 보낸다.
   static const int keepaliveIntervalSeconds = 30;
 
-  /// 통화는 오디오 전용이다. 인터폰은 G.711 만 하므로 SDP 는 손대지 않는다.
-  /// flutter_webrtc 기본 offer 에 PCMU/PCMA 가 들어 있고, 좁히면 소리가 끊긴다.
-  static const Map<String, dynamic> callMediaConstraints = {
-    'audio': true,
-    'video': false,
-  };
+  /// 통화에 쓸 로컬 미디어 제약. SDP 는 손대지 않는다 — 인터폰은 G.711 만 하고,
+  /// flutter_webrtc 기본 offer 에 PCMU/PCMA 가 들어 있으니 좁히면 소리가 끊긴다.
+  ///
+  /// 영상은 상대(월패드·kamailio-sip-client)가 H.264 만 받는다. Janus 는
+  /// 트랜스코딩하지 않으므로 이 기기가 H.264 인코더를 내놓지 못하면 영상 m-line
+  /// 은 거절되고 음성만 붙는다. 해상도는 상대 단말이 352x288 을 기본으로 하니
+  /// 그보다 크게 잡을 이유가 없다.
+  static Map<String, dynamic> mediaConstraints({required bool video}) => {
+        'audio': true,
+        'video': video
+            ? {
+                'width': 640,
+                'height': 480,
+                'frameRate': 15,
+                'facingMode': 'user',
+              }
+            : false,
+      };
 
   /// 내선 번호나 전체 URI 를 받아 SIP URI 로 정규화한다.
   ///

@@ -74,6 +74,23 @@ class SipService extends ChangeNotifier {
 
   MediaStream? _localStream;
 
+  /// 원격 영상 트랙을 담아 렌더러에 물리는 컨테이너. 오디오는 flutter_webrtc 가
+  /// 알아서 재생하므로 여기엔 영상만 담는다.
+  MediaStream? _remoteStream;
+
+  /// 영상 렌더러. 첫 영상 통화에서 초기화하고 서비스가 죽을 때까지 재사용한다.
+  final RTCVideoRenderer localRenderer = RTCVideoRenderer();
+  final RTCVideoRenderer remoteRenderer = RTCVideoRenderer();
+  bool _renderersReady = false;
+
+  /// 이번 통화에서 내 카메라를 내보내는지.
+  bool _localVideo = false;
+
+  /// 원격 영상 트랙이 실제로 도착했는지.
+  bool _remoteVideo = false;
+
+  bool _cameraOff = false;
+
   /// 착신 이벤트로 받은 offer. 사용자가 받기를 누를 때 소비한다.
   RTCSessionDescription? _pendingOffer;
 
@@ -128,6 +145,19 @@ class SipService extends ChangeNotifier {
 
   bool get micMuted => _micMuted;
   bool get speakerOn => _speakerOn;
+
+  /// 내 카메라 영상을 내보내는 통화인지.
+  bool get localVideo => _localVideo;
+
+  /// 상대 영상이 들어오고 있는지.
+  bool get remoteVideo => _remoteVideo;
+
+  /// 영상을 한쪽이라도 주고받는 통화인지. 화면 배치를 가른다.
+  bool get isVideoCall => _localVideo || _remoteVideo;
+  bool get cameraOff => _cameraOff;
+
+  /// 걸려온 통화의 offer 에 영상이 실려 있는지. 받기 화면에 알려 준다.
+  bool get incomingHasVideo => _sdpHasVideo(_pendingOffer?.sdp);
   bool get isRegistered => _registrationState == SipRegistrationState.registered;
   bool get hasCall => _callState != CallState.none;
 
@@ -245,7 +275,13 @@ class SipService extends ChangeNotifier {
     // 원격 오디오 트랙이 실제로 도착했는지. 소리가 안 날 때 어디까지 갔는지
     // 가르는 첫 번째 단서다.
     _track<RemoteTrack>(sip.remoteTrack, (event) async {
-      if (event.track?.kind != 'audio') return;
+      final track = event.track;
+      if (track == null) return;
+      if (track.kind == 'video') {
+        await _attachRemoteVideo(track, flowing: event.flowing == true);
+        return;
+      }
+      if (track.kind != 'audio') return;
       _remoteTrackArrived = event.flowing == true;
       _diagnostics =
           _diagnostics.copyWith(remoteTrackArrived: _remoteTrackArrived);
@@ -452,6 +488,7 @@ class SipService extends ChangeNotifier {
           reports,
           iceState: _iceState,
           remoteTrackArrived: _remoteTrackArrived,
+          remoteVideoArrived: _remoteVideo,
           localSdp: local?.sdp,
           remoteSdp: remote?.sdp,
         );
@@ -471,36 +508,45 @@ class SipService extends ChangeNotifier {
 
   bool _sdpDumped = false;
 
-  /// 통화당 한 번, 오디오 m-section 을 로그에 남긴다.
+  /// 통화당 한 번, 오디오·영상 m-section 을 로그에 남긴다.
   ///
-  /// 방향이나 코덱이 이상할 때 붙여 넣어 볼 수 있는 근거가 된다.
+  /// 영상이 안 뜰 때 첫 질문은 "영상 m-line 이 협상됐는가" 다. 상대 answer 의
+  /// `m=video 0` 이면 프로파일·packetization-mode 가 안 맞아 거절된 것이고,
+  /// 포트가 있는데 화면이 검으면 키프레임이나 렌더러 쪽이다.
   void _dumpSdpOnce(String? localSdp, String? remoteSdp) {
     if (_sdpDumped || remoteSdp == null) return;
     _sdpDumped = true;
-    debugPrint('=== 로컬 offer audio m-section ===\n${_audioSection(localSdp)}');
-    debugPrint('=== 원격 answer audio m-section ===\n${_audioSection(remoteSdp)}');
+    debugPrint('=== 로컬 audio m-section ===\n${_mediaSection(localSdp, 'audio')}');
+    debugPrint('=== 원격 audio m-section ===\n${_mediaSection(remoteSdp, 'audio')}');
+    if (_localVideo || _sdpHasVideo(remoteSdp)) {
+      debugPrint('=== 로컬 video m-section ===\n${_mediaSection(localSdp, 'video')}');
+      debugPrint('=== 원격 video m-section ===\n${_mediaSection(remoteSdp, 'video')}');
+    }
   }
 
-  String _audioSection(String? sdp) {
+  String _mediaSection(String? sdp, String kind) {
     if (sdp == null) return '(없음)';
     final lines = const LineSplitter().convert(sdp);
     final section = <String>[];
-    var inAudio = false;
+    var inSection = false;
     for (final raw in lines) {
       final line = raw.trim();
       if (line.startsWith('m=')) {
-        if (inAudio) break;
-        inAudio = line.startsWith('m=audio');
+        if (inSection) break;
+        inSection = line.startsWith('m=$kind');
       }
-      if (inAudio) section.add(line);
+      if (inSection) section.add(line);
     }
-    return section.isEmpty ? '(m=audio 없음)' : section.join('\n');
+    return section.isEmpty ? '(m=$kind 없음)' : section.join('\n');
   }
 
   // ------------------------------------------------------------------- 발신
 
   /// [target] 은 내선 번호(`0010200601`) 또는 전체 SIP URI 를 받는다.
-  Future<void> call(String target) async {
+  ///
+  /// [video] 가 참이면 카메라를 켜고 영상 m-line 을 함께 낸다. 카메라 권한이
+  /// 없으면 음성으로만 건다 — 영상 때문에 통화 자체를 막을 이유는 없다.
+  Future<void> call(String target, {bool video = false}) async {
     final sip = _sip;
     if (sip == null || !isRegistered) {
       _fail('먼저 SIP 등록을 마쳐야 합니다.');
@@ -512,26 +558,28 @@ class SipService extends ChangeNotifier {
     if (!verifyLink()) return;
     _clearError();
     if (!await _ensureMicrophone()) return;
+    final withVideo = video && await _ensureCamera();
     _expectedHangup = false;
 
     try {
       _peer = SipConfig.displayOf(SipConfig.toSipUri(target, domain: _account?.domain));
       // 발신을 누른 순간부터 켠다. 상대가 받기 전에 홈으로 나가도 마이크가
       // 살아 있어야 연결되자마자 소리가 간다.
-      await CallForegroundService.start(peer: _peer);
+      await CallForegroundService.start(peer: _peer, video: withVideo);
       _setCall(CallState.outgoing);
 
       // 이전 통화가 남긴 PeerConnection 위에서 재협상하지 않도록 새로 세운다.
       await _freshPeerConnection(sip);
+      await _startLocalMedia(sip, video: withVideo);
 
-      _localStream = await sip.initializeMediaDevices(
-        mediaConstraints: SipConfig.callMediaConstraints,
+      // SDP 는 손대지 않는다 — PCMU/PCMA 가 남아 있어야 인터폰과 소리가 통한다.
+      // 래퍼의 기본 offer 는 영상 수신을 끄므로, 영상 통화는 offer 를 직접 만든다.
+      final offer =
+          await sip.createOffer(audioRecv: true, videoRecv: withVideo);
+      await sip.call(
+        SipConfig.toSipUri(target, domain: _account?.domain),
+        offer: offer,
       );
-      _applyMicState();
-
-      // offer 는 래퍼가 audioRecv 로 만든다. SDP 는 손대지 않는다 —
-      // PCMU/PCMA 가 남아 있어야 인터폰과 소리가 통한다.
-      await sip.call(SipConfig.toSipUri(target, domain: _account?.domain));
       _armCallTimeout(SipConfig.callTimeout, '응답이 없어 통화를 종료했습니다.');
     } catch (e) {
       final reason = _describeSendFailure('발신에 실패했습니다', e);
@@ -547,23 +595,25 @@ class SipService extends ChangeNotifier {
   // ------------------------------------------------------------------- 착신
 
   /// 착신을 받는다. 로컬 미디어를 먼저 붙여야 answer 에 트랙이 실린다.
-  Future<void> acceptCall() async {
+  ///
+  /// [video] 를 비우면 상대가 영상을 실어 보냈을 때만 카메라를 켠다. 상대가
+  /// 영상을 보냈는데 우리가 카메라 없이 받으면 answer 의 영상 m-line 이
+  /// recvonly 가 되어 상대 화면만 보는 통화가 된다 — 인터폰 카메라를 보는
+  /// 쓰임새다.
+  Future<void> acceptCall({bool? video}) async {
     final sip = _sip;
     final offer = _pendingOffer;
     if (sip == null || offer == null) return;
     _clearError();
     if (!await _ensureMicrophone()) return;
+    final withVideo = (video ?? incomingHasVideo) && await _ensureCamera();
     _expectedHangup = false;
 
     try {
-      await CallForegroundService.start(peer: _peer);
+      await CallForegroundService.start(peer: _peer, video: withVideo);
       // 착신도 마찬가지다. 직전 통화의 PC 를 재사용하면 answer 가 어긋난다.
       await _freshPeerConnection(sip);
-
-      _localStream = await sip.initializeMediaDevices(
-        mediaConstraints: SipConfig.callMediaConstraints,
-      );
-      _applyMicState();
+      await _startLocalMedia(sip, video: withVideo);
 
       // 트랙을 붙인 뒤에 remote offer 를 세팅해야 accept() 가 answer 를 만든다.
       await sip.handleRemoteJsep(offer);
@@ -674,6 +724,103 @@ class SipService extends ChangeNotifier {
     }
   }
 
+  // ------------------------------------------------------------------- 영상
+
+  /// 카메라를 잠시 끈다. 트랙은 살려 두고 enabled 만 내리므로 재협상이 없다.
+  void toggleCamera() {
+    if (!_localVideo) return;
+    _cameraOff = !_cameraOff;
+    for (final track in _localStream?.getVideoTracks() ?? const []) {
+      track.enabled = !_cameraOff;
+    }
+    notifyListeners();
+  }
+
+  /// 전면·후면 카메라를 바꾼다.
+  Future<void> switchCamera() async {
+    final track = _localStream?.getVideoTracks().firstOrNull;
+    if (track == null) return;
+    try {
+      await Helper.switchCamera(track);
+    } catch (e) {
+      debugPrint('카메라 전환 실패: $e');
+    }
+  }
+
+  /// 카메라 권한을 확인한다. 없으면 영상만 포기하고 통화는 계속한다.
+  Future<bool> _ensureCamera() async {
+    var status = await Permission.camera.status;
+    if (status.isDenied) status = await Permission.camera.request();
+    final granted = status.isGranted || status.isLimited;
+    if (!granted) debugPrint('카메라 권한이 없어 음성으로만 통화한다');
+    return granted;
+  }
+
+  /// 마이크(와 카메라)를 잡아 PeerConnection 에 붙이고 렌더러에 물린다.
+  Future<void> _startLocalMedia(JanusSipPlugin sip, {required bool video}) async {
+    _localStream = await sip.initializeMediaDevices(
+      mediaConstraints: SipConfig.mediaConstraints(video: video),
+    );
+    _applyMicState();
+    _localVideo = _localStream?.getVideoTracks().isNotEmpty ?? false;
+    if (_localVideo) {
+      await _ensureRenderers();
+      localRenderer.srcObject = _localStream;
+    }
+    notifyListeners();
+  }
+
+  Future<void> _ensureRenderers() async {
+    if (_renderersReady) return;
+    _renderersReady = true;
+    await localRenderer.initialize();
+    await remoteRenderer.initialize();
+  }
+
+  /// 원격 영상 트랙을 컨테이너 스트림에 담아 렌더러에 물린다.
+  ///
+  /// 상대가 영상 없이 answer 하면 이 트랙은 오지 않는다. 그러면 [remoteVideo]
+  /// 가 거짓으로 남아 화면은 음성 통화 배치를 유지한다. 한 번 도착한 뒤의
+  /// mute(패킷이 잠시 끊김)는 무시한다 — 그때마다 배치를 바꾸면 화면이 튄다.
+  Future<void> _attachRemoteVideo(MediaStreamTrack track,
+      {required bool flowing}) async {
+    if (!flowing) return;
+    await _ensureRenderers();
+    _remoteStream ??= await createLocalMediaStream('sip_remote');
+    final stream = _remoteStream!;
+    if (!stream.getVideoTracks().any((t) => t.id == track.id)) {
+      await stream.addTrack(track);
+    }
+    remoteRenderer.srcObject = stream;
+    _remoteVideo = true;
+    notifyListeners();
+  }
+
+  Future<void> _releaseVideo() async {
+    _localVideo = false;
+    _remoteVideo = false;
+    if (_renderersReady) {
+      localRenderer.srcObject = null;
+      remoteRenderer.srcObject = null;
+    }
+    final stream = _remoteStream;
+    _remoteStream = null;
+    if (stream != null) {
+      try {
+        await stream.dispose();
+      } catch (e) {
+        debugPrint('원격 스트림 정리 실패: $e');
+      }
+    }
+  }
+
+  static bool _sdpHasVideo(String? sdp) {
+    if (sdp == null) return false;
+    return const LineSplitter()
+        .convert(sdp)
+        .any((line) => line.startsWith('m=video ') && !line.startsWith('m=video 0 '));
+  }
+
   Future<void> toggleSpeaker() async {
     _speakerOn = !_speakerOn;
     try {
@@ -697,6 +844,8 @@ class SipService extends ChangeNotifier {
     _lastCallId = null;
     _connectedAt = null;
     _micMuted = false;
+    _cameraOff = false;
+    await _releaseVideo();
     if (_speakerOn != _speakerBeforeCall) {
       _speakerOn = _speakerBeforeCall;
       try {
@@ -733,6 +882,7 @@ class SipService extends ChangeNotifier {
       debugPrint('세션 정리 실패: $e');
     }
 
+    await _releaseVideo();
     _sip = null;
     _connection = null;
     _extension = null;
@@ -881,6 +1031,10 @@ class SipService extends ChangeNotifier {
   @override
   void dispose() {
     unawaited(disconnect());
+    if (_renderersReady) {
+      unawaited(localRenderer.dispose());
+      unawaited(remoteRenderer.dispose());
+    }
     super.dispose();
   }
 }

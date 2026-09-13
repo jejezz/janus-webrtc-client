@@ -20,6 +20,10 @@ class CallDiagnostics {
     this.packetsSent = 0,
     this.packetsReceived = 0,
     this.remoteTrackArrived = false,
+    this.videoCodec,
+    this.videoBytesSent = 0,
+    this.videoBytesReceived = 0,
+    this.remoteVideoArrived = false,
     this.lossPercent,
     this.rttMs,
     this.candidatePair,
@@ -47,6 +51,17 @@ class CallDiagnostics {
 
   /// 원격 오디오 트랙 이벤트를 받았는지.
   final bool remoteTrackArrived;
+
+  /// 협상된 비디오 코덱 (`video/H264` 등). 영상 m-line 이 없으면 null.
+  ///
+  /// 월패드·kamailio-sip-client 는 H.264 만 받는다. 이 기기가 H.264 인코더를
+  /// 내놓지 못해 VP8 로만 offer 했다면 상대는 영상을 거절하고 여기가 비어 있다.
+  final String? videoCodec;
+  final int videoBytesSent;
+  final int videoBytesReceived;
+
+  /// 원격 영상 트랙이 도착했는지.
+  final bool remoteVideoArrived;
 
   /// 선택된 ICE 후보쌍 요약.
   final String? candidatePair;
@@ -81,6 +96,11 @@ class CallDiagnostics {
 
   bool get sending => bytesSent > 0;
   bool get receiving => bytesReceived > 0;
+  bool get videoSending => videoBytesSent > 0;
+  bool get videoReceiving => videoBytesReceived > 0;
+
+  /// 영상 코덱이 H.264 로 협상됐는지. 인터폰 계열은 이것만 받는다.
+  bool get isH264 => videoCodec?.toLowerCase().contains('h264') ?? false;
 
   /// 양방향 RTP 가 확인된 상태.
   bool get mediaFlowing => sending && receiving;
@@ -100,6 +120,10 @@ class CallDiagnostics {
     int? packetsSent,
     int? packetsReceived,
     bool? remoteTrackArrived,
+    String? videoCodec,
+    int? videoBytesSent,
+    int? videoBytesReceived,
+    bool? remoteVideoArrived,
     double? lossPercent,
     int? rttMs,
     String? candidatePair,
@@ -115,6 +139,10 @@ class CallDiagnostics {
       packetsSent: packetsSent ?? this.packetsSent,
       packetsReceived: packetsReceived ?? this.packetsReceived,
       remoteTrackArrived: remoteTrackArrived ?? this.remoteTrackArrived,
+      videoCodec: videoCodec ?? this.videoCodec,
+      videoBytesSent: videoBytesSent ?? this.videoBytesSent,
+      videoBytesReceived: videoBytesReceived ?? this.videoBytesReceived,
+      remoteVideoArrived: remoteVideoArrived ?? this.remoteVideoArrived,
       lossPercent: lossPercent ?? this.lossPercent,
       rttMs: rttMs ?? this.rttMs,
       candidatePair: candidatePair ?? this.candidatePair,
@@ -155,11 +183,15 @@ class CallDiagnostics {
     return mediaLevel ?? sessionLevel ?? (sdp.contains('m=audio') ? 'sendrecv' : null);
   }
 
-  /// `getStats()` 결과에서 오디오 관련 값만 추려 낸다.
+  /// `getStats()` 결과에서 오디오(와 영상) 값을 추려 낸다.
+  ///
+  /// 손실·왕복은 오디오만 본다. 통화 품질의 기준은 소리이고, 영상은 있으면
+  /// 좋은 것이라 바이트가 흐르는지만 확인한다.
   static CallDiagnostics fromStats(
     List<StatsReport> reports, {
     RTCIceConnectionState? iceState,
     bool remoteTrackArrived = false,
+    bool remoteVideoArrived = false,
     String? localSdp,
     String? remoteSdp,
   }) {
@@ -167,8 +199,11 @@ class CallDiagnostics {
     var bytesReceived = 0;
     var packetsSent = 0;
     var packetsReceived = 0;
+    var videoBytesSent = 0;
+    var videoBytesReceived = 0;
     String? codecId;
     String? codec;
+    String? videoCodecId;
     String? candidatePair;
     var packetsLost = 0;
     int? rttMs;
@@ -182,17 +217,28 @@ class CallDiagnostics {
 
       switch (report.type) {
         case 'outbound-rtp':
+          if (kind == 'video') {
+            videoBytesSent += _asInt(values['bytesSent']);
+            videoCodecId ??= values['codecId'] as String?;
+            continue;
+          }
           if (kind != 'audio') continue;
           bytesSent += _asInt(values['bytesSent']);
           packetsSent += _asInt(values['packetsSent']);
           codecId ??= values['codecId'] as String?;
         case 'inbound-rtp':
+          if (kind == 'video') {
+            videoBytesReceived += _asInt(values['bytesReceived']);
+            videoCodecId ??= values['codecId'] as String?;
+            continue;
+          }
           if (kind != 'audio') continue;
           bytesReceived += _asInt(values['bytesReceived']);
           packetsReceived += _asInt(values['packetsReceived']);
           packetsLost += _asInt(values['packetsLost']);
           codecId ??= values['codecId'] as String?;
         case 'remote-inbound-rtp':
+          if (kind == 'video') continue;
           // 상대가 보고해 주는 값이다. 초 단위라 ms 로 바꾼다.
           final rtt = _asDouble(values['roundTripTime']);
           if (rtt != null) rttMs = (rtt * 1000).round();
@@ -215,6 +261,9 @@ class CallDiagnostics {
     if (codecId != null) {
       codec = byId[codecId]?.values['mimeType'] as String?;
     }
+    final videoCodec = videoCodecId == null
+        ? null
+        : byId[videoCodecId]?.values['mimeType'] as String?;
 
     return CallDiagnostics(
       iceState: iceState,
@@ -224,6 +273,10 @@ class CallDiagnostics {
       packetsSent: packetsSent,
       packetsReceived: packetsReceived,
       remoteTrackArrived: remoteTrackArrived,
+      videoCodec: videoCodec,
+      videoBytesSent: videoBytesSent,
+      videoBytesReceived: videoBytesReceived,
+      remoteVideoArrived: remoteVideoArrived,
       lossPercent: packetsReceived + packetsLost == 0
           ? null
           : packetsLost * 100 / (packetsReceived + packetsLost),

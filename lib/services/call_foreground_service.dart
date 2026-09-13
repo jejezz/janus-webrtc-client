@@ -16,10 +16,13 @@ abstract final class CallForegroundService {
   static bool get _supported => !kIsWeb && Platform.isAndroid;
 
   /// 통화가 시작될 때. [peer] 는 알림에 보여 줄 상대 표시다.
-  static Future<void> start({String? peer}) async {
+  ///
+  /// [video] 가 참이면 서비스 유형에 camera 를 더한다. 그래야 화면을 벗어나도
+  /// 카메라가 끊기지 않는다 (안드로이드 14+ 는 유형 없는 카메라 접근을 막는다).
+  static Future<void> start({String? peer, bool video = false}) async {
     if (!_supported) return;
     try {
-      await _channel.invokeMethod<void>('start', {'peer': peer});
+      await _channel.invokeMethod<void>('start', {'peer': peer, 'video': video});
     } catch (e) {
       // 서비스를 못 띄워도 통화 자체는 계속돼야 한다. 화면을 벗어났을 때만
       // 마이크가 끊길 뿐이다.

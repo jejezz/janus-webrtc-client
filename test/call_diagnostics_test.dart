@@ -90,6 +90,14 @@ void main() {
     });
   });
 
+  group('isH264', () {
+    test('영상 m-line 이 없으면 거짓, H264 만 참', () {
+      expect(const CallDiagnostics().isH264, isFalse);
+      expect(const CallDiagnostics(videoCodec: 'video/VP8').isH264, isFalse);
+      expect(const CallDiagnostics(videoCodec: 'video/H264').isH264, isTrue);
+    });
+  });
+
   group('iceConnected', () {
     test('후보쌍이 잡혔으면 콜백이 없어도 붙은 것으로 본다', () {
       const d = CallDiagnostics(candidatePair: 'prflx → host');
