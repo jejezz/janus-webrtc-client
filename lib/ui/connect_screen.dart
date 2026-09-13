@@ -385,8 +385,10 @@ class _ConnectScreenState extends State<ConnectScreen> {
                         const Spacer(flex: 2),
                         const JanusMark(width: 180),
                         const SizedBox(height: 8),
+                        // 앱 이름. "I got the door" — 초인종이 울리면
+                        // 내가 받고, 문도 내가 연다는 뜻이다.
                         const Text(
-                          'Janus Client',
+                          'GotDoor',
                           textAlign: TextAlign.center,
                           style: TextStyle(
                             fontSize: 28,
@@ -424,7 +426,7 @@ class _ConnectScreenState extends State<ConnectScreen> {
     if (_profile.complexName.isNotEmpty) {
       return '${_profile.complexName} · ${_profile.building}동 ${_profile.unit}호';
     }
-    return '인터폰 통화 · SIP over WebRTC';
+    return '인터폰, 제가 받을게요';
   }
 
   List<Widget> _buildStatus(BuildContext context) {

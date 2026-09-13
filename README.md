@@ -1,6 +1,8 @@
-# Janus WebRTC Client App
+# GotDoor
 
-A new Flutter project.
+아파트 인터폰·월패드와 통화하고 문을 여는 모바일 앱. "I got the door" — 초인종이
+울리면 내가 받고, 문도 내가 연다. Janus 의 SIP 플러그인을 통해 Kamailio 에 붙는다
+(NOTES.md).
 
 ## Getting Started
 

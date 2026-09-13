@@ -35,7 +35,7 @@ class JanusClientApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'Janus SIP Client',
+      title: 'GotDoor',
       debugShowCheckedModeBanner: false,
       theme: buildAppTheme(),
       home: const ConnectScreen(),

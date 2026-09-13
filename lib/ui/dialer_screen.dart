@@ -181,7 +181,7 @@ class _DialerScreenState extends State<DialerScreen> {
       child: Scaffold(
         extendBodyBehindAppBar: true,
         appBar: AppBar(
-          title: const Text('인터폰 통화'),
+          title: const Text('GotDoor'),
           actions: [
             IconButton(
               tooltip: '단말 등록 상태',
