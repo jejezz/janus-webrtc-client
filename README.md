@@ -37,6 +37,16 @@ python3 tool/generate_app_icon.py   # 필요: pillow, numpy
   adaptive icon 용 `foreground`/`background`/`monochrome`(Android 13 테마 아이콘)
 - `android/.../mipmap-anydpi-v26/ic_launcher.xml` — adaptive icon 정의
 
+## 릴리스
+
+```bash
+tool/release.sh
+```
+
+pubspec 의 `version` 을 올리고 커밋한 뒤 돌린다. arm64 전용 APK 를 빌드해 태그를
+밀고 GitHub Release **초안**을 만든다 — 노트를 채우고 공개하면 된다. universal
+APK 는 올리지 않는다 (설치 기기가 전부 arm64 이고 세 배 크다).
+
 ## UI 디자인 시스템
 
 앱 아이콘의 색·형태 언어(보라→인디고 그라디언트, 시안/핑크 글로우, 열린 문 마크)를
