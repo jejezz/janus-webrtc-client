@@ -39,7 +39,7 @@ python3 tool/generate_app_icon.py   # 필요: pillow, numpy
 
 ## UI 디자인 시스템
 
-앱 아이콘의 색·형태 언어(보라→인디고 그라디언트, 시안/핑크 글로우, 말풍선 마크)를
+앱 아이콘의 색·형태 언어(보라→인디고 그라디언트, 시안/핑크 글로우, 문·손잡이 마크)를
 화면에도 그대로 쓴다. 새 화면을 만들 때는 아래 조각을 조합한다.
 
 - [lib/ui/theme/app_theme.dart](lib/ui/theme/app_theme.dart) — `AppPalette` 와 `buildAppTheme()`.
@@ -48,7 +48,7 @@ python3 tool/generate_app_icon.py   # 필요: pillow, numpy
   통화처럼 자원을 아껴야 할 때는 `animate: false` 로 멈춘다.
 - [GlassCard · SectionLabel · StatusPill · GlowButton · CircleActionButton](lib/ui/widgets/glass.dart)
   — 유리 패널, 구획 제목, 상태 알약, 주 동작 버튼, 통화용 원형 버튼.
-- [JanusMark](lib/ui/widgets/janus_mark.dart) — 말풍선은 아이콘 생성기가 만든
-  `assets/icon/call_glyph.png` 를 얹고, 시그널 아크만 벡터로 그려 바깥으로 번지게 한다.
+- [DoorMark](lib/ui/widgets/door_mark.dart) — 문과 손잡이는 아이콘 생성기가 만든
+  `assets/icon/door_glyph.png` 를 얹고, 시그널 아크만 벡터로 그려 바깥으로 번지게 한다.
   아이콘을 다시 뽑으면 화면 로고도 같이 바뀐다.
 - [PulseAvatar](lib/ui/widgets/pulse_avatar.dart) — 통화 상대 아바타. 링이 퍼진다.

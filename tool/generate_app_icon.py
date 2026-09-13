@@ -1,25 +1,24 @@
 #!/usr/bin/env python3
-"""Janus WebRTC Client 앱 아이콘 생성기.
+"""GotDoor 앱 아이콘 생성기.
 
 1024x1024 마스터를 코드로 그린 뒤 iOS/Android 런처 리소스를 한 번에 뽑는다.
 색/형태를 바꾸려면 아래 상수만 고치고 `python3 tool/generate_app_icon.py` 를 다시 돌리면 된다.
 
-  모티브: 주고받는 말풍선(통화) + 좌우로 퍼지는 시그널 아크(WebRTC).
-  가운데 글리프는 `assets/icon/glyph_source.png` 를 그대로 얹는다.
-  오른쪽 위 글자는 같은 계열의 다른 앱과 홈 화면에서 구별하기 위한 표식이다.
+  모티브: 레버형 문손잡이("I got the door" — 내가 받고, 내가 연다)
+         + 좌우로 퍼지는 시그널 아크(초인종이 울리고, 통화가 붙는다).
+  손잡이는 코드로 그린다. 원본 그림이 따로 없다.
 
-같은 좌표계를 Flutter 쪽 JanusMark 위젯이 그대로 쓰므로, 글리프를 고치면
-`assets/icon/call_glyph.png` 가 다시 생성되어 앱 화면에도 함께 반영된다.
+같은 좌표계를 Flutter 쪽 DoorMark 위젯이 그대로 쓰므로, 손잡이를 고치면
+`assets/icon/door_glyph.png` 가 다시 생성되어 앱 화면에도 함께 반영된다.
 """
 
 from __future__ import annotations
 
 import json
-import math
 from pathlib import Path
 
 import numpy as np
-from PIL import Image, ImageDraw, ImageFilter, ImageFont
+from PIL import Image, ImageDraw, ImageFilter
 
 ROOT = Path(__file__).resolve().parent.parent
 U = 1024.0  # 도형 좌표계 기준 크기
@@ -29,28 +28,21 @@ BG_STOPS = [(0.00, (139, 92, 246)), (0.45, (79, 70, 229)), (1.00, (12, 18, 43))]
 GLOW_CYAN = ((0.84, 0.16), 0.58, (34, 211, 238), 0.50)   # (중심), 반경, 색, 세기
 GLOW_PINK = ((0.14, 0.88), 0.55, (244, 114, 182), 0.45)
 
-# ── 가운데 글리프 ─────────────────────────────────────────────────────────────
-# 직접 그리지 않고 준비된 그림을 그대로 얹는다. 바꾸려면 이 파일만 교체하면 된다.
-GLYPH_SOURCE = ROOT / "assets/icon/glyph_source.png"
-GLYPH_CENTER = (512, 496)
-GLYPH_SIZE = 450          # 긴 변 기준, 1024 좌표계. 아크와 붙지 않을 만큼
+# ── 가운데 글리프: 문 + 레버형 손잡이 ────────────────────────────────────────
+# 문 윤곽 안에 레버 손잡이가 달려 있다. 손잡이만 그리면 열쇠나 전원 표시로
+# 읽혀서, 문 테두리로 맥락을 준다. 값은 전부 1024 좌표계.
+# 모서리를 거의 세워야 전화기로 안 읽힌다. 안쪽은 옅게 채워 판으로 보이게 한다.
+DOOR = (352, 256, 672, 744)   # 문 윤곽 (left, top, right, bottom)
+DOOR_RADIUS = 16
+DOOR_STROKE = 32
+DOOR_FILL_ALPHA = 58
+ROSE_CENTER = (592, 500)      # 손잡이 축. 여닫는 쪽(오른쪽) 가까이
+ROSE_OUTER = 52
+LEVER_WIDTH = 50
+LEVER = [(592, 500), (462, 500), (436, 524)]   # 축 → 왼쪽으로 → 처진 끝
+GLYPH_COLOR = (255, 255, 255)
+GLYPH_SHADE = (199, 210, 254)  # 아랫면. 아이콘 팔레트의 mist
 GLYPH_GLOW = (56, 189, 248)
-MONO_CUT = 212            # 이보다 밝은 픽셀은 테마 아이콘에서 파낸다
-
-# ── 앱 구분 표식 ──────────────────────────────────────────────────────────────
-# 같은 계열의 다른 앱(SIP 판)과 홈 화면에서 골라 누를 수 있도록 한 글자만 넣는다.
-# 무슨 뜻인지 읽히지 않아도 되고, W 와 S 가 서로 달라 보이기만 하면 된다.
-BADGE_TEXT = "W"
-BADGE_CENTER = (860, 220)   # 1024 좌표계, 글자 중심
-BADGE_HEIGHT = 150          # 대문자 높이
-BADGE_COLOR = (255, 255, 255)
-# 개발 머신에 있는 굵은 산세리프를 순서대로 찾는다. Flutter SDK 의 Roboto 가
-# 첫 후보다 — 아이콘 나머지와 결이 맞고 라이선스도 걸리지 않는다.
-BADGE_FONT_CANDIDATES = [
-    Path.home() / "FlutterProject/flutter/bin/cache/artifacts/material_fonts/Roboto-Black.ttf",
-    Path("/System/Library/Fonts/Supplemental/Arial Black.ttf"),
-    Path("/System/Library/Fonts/Supplemental/Arial Bold.ttf"),
-]
 
 # ── 시그널 아크 ───────────────────────────────────────────────────────────────
 ARC_RIGHT = (103, 232, 249)
@@ -59,71 +51,46 @@ ARC_CENTER = (512, 500)
 ARC_SPAN = 50                 # 중심선 기준 ±각도
 ARCS = [(330, 26, 1.00), (400, 20, 0.62)]  # 반경, 두께, 알파
 
-# 마크가 차지하는 영역. Flutter 의 JanusMark 도 같은 값을 쓴다.
+# 마크가 차지하는 영역. Flutter 의 DoorMark 도 같은 값을 쓴다.
 CONTENT = (74, 150, 950, 850)
 
 
-def draw_glyph(size: int = 2560, mono: bool = False) -> Image.Image:
-    """가운데 글리프만 담은 레이어(아크 없음). Flutter 위젯도 이 그림을 쓴다."""
-    if not GLYPH_SOURCE.exists():
-        raise FileNotFoundError(f"글리프 원본이 없습니다: {GLYPH_SOURCE}")
-    src = Image.open(GLYPH_SOURCE).convert("RGBA")
-    src = src.crop(src.getbbox())  # 원본 여백은 버리고 우리 여백을 쓴다
+def _draw_handle(d: ImageDraw.ImageDraw, scale: float, color, fill=None) -> None:
+    """문 윤곽과 손잡이 실루엣 하나. fill 은 문 안쪽 색(없으면 비운다)."""
+    box = tuple(v * scale for v in DOOR)
+    d.rounded_rectangle(box, radius=DOOR_RADIUS * scale, fill=fill,
+                        outline=color, width=int(DOOR_STROKE * scale))
+    cx, cy = ROSE_CENTER[0] * scale, ROSE_CENTER[1] * scale
+    w = LEVER_WIDTH * scale
+    pts = [(x * scale, y * scale) for x, y in LEVER]
+    # 레버: 둥근 이음과 둥근 끝. line 의 joint='curve' 가 꺾이는 자리를 메운다.
+    d.line(pts, fill=color, width=int(w), joint="curve")
+    for x, y in (pts[0], pts[-1]):
+        d.ellipse((x - w / 2, y - w / 2, x + w / 2, y + w / 2), fill=color)
+    r = ROSE_OUTER * scale
+    d.ellipse((cx - r, cy - r, cx + r, cy + r), fill=color)
 
-    scale = size / U
-    target = GLYPH_SIZE * scale
-    ratio = target / max(src.size)
-    art = src.resize((max(int(src.size[0] * ratio), 1),
-                      max(int(src.size[1] * ratio), 1)), Image.LANCZOS)
+
+def draw_glyph(size: int = 2560, mono: bool = False) -> Image.Image:
+    """가운데 문·손잡이만 담은 레이어(아크 없음). Flutter 위젯도 이 그림을 쓴다."""
+    ss = 2  # 곡선 가장자리를 위해 두 배로 그려 줄인다
+    big = size * ss
+    scale = big / U
+    layer = Image.new("RGBA", (big, big), (0, 0, 0, 0))
 
     if mono:
-        # 테마 아이콘은 한 색뿐이라 실루엣만 남는다. 그대로 두면 덩어리로 뭉치므로
-        # 원본에서 밝은 부분(말풍선 안 글줄)을 파내 형태를 살린다.
-        rgb = np.asarray(art.convert("RGB"), dtype=np.float32)
-        luma = rgb @ np.array([0.299, 0.587, 0.114], dtype=np.float32)
-        keep = np.array(art.split()[3], dtype=np.float32)
-        keep *= np.clip((MONO_CUT - luma) / 24.0, 0.0, 1.0)  # 경계는 부드럽게
-        white = Image.new("RGBA", art.size, (255, 255, 255, 255))
-        white.putalpha(Image.fromarray(keep.astype(np.uint8)))
-        art = white
+        _draw_handle(ImageDraw.Draw(layer), scale, (255, 255, 255, 255))
+        return layer.resize((size, size), Image.LANCZOS)
 
-    layer = Image.new("RGBA", (size, size), (0, 0, 0, 0))
-    layer.paste(art, (int(GLYPH_CENTER[0] * scale - art.size[0] / 2),
-                      int(GLYPH_CENTER[1] * scale - art.size[1] / 2)), art)
-    return layer
-
-
-def _badge_font(pixel_height: float) -> ImageFont.FreeTypeFont:
-    for path in BADGE_FONT_CANDIDATES:
-        if path.exists():
-            # 요청한 대문자 높이가 나오도록 한 번 재어 보고 크기를 맞춘다.
-            probe = ImageFont.truetype(str(path), 100)
-            box = probe.getbbox(BADGE_TEXT)
-            measured = box[3] - box[1]
-            return ImageFont.truetype(str(path), int(100 * pixel_height / measured))
-    raise FileNotFoundError(
-        "표식에 쓸 폰트를 찾지 못했습니다. BADGE_FONT_CANDIDATES 에 경로를 추가하세요.")
-
-
-def draw_badge(size: int, mono: bool) -> Image.Image:
-    """오른쪽 위 한 글자."""
-    scale = size / U
-    layer = Image.new("RGBA", (size, size), (0, 0, 0, 0))
-    d = ImageDraw.Draw(layer)
-    font = _badge_font(BADGE_HEIGHT * scale)
-    center = (BADGE_CENTER[0] * scale, BADGE_CENTER[1] * scale)
-    color = (255, 255, 255) if mono else BADGE_COLOR
-
-    if not mono:  # 배경이 밝은 자리에서도 읽히도록 그림자를 깔아 둔다
-        shadow = Image.new("RGBA", (size, size), (0, 0, 0, 0))
-        ImageDraw.Draw(shadow).text(
-            (center[0], center[1] + 4 * scale), BADGE_TEXT,
-            font=font, fill=(10, 8, 40, 160), anchor="mm")
-        layer.alpha_composite(shadow.filter(
-            ImageFilter.GaussianBlur(6 * scale)))
-
-    d.text(center, BADGE_TEXT, font=font, fill=color + (255,), anchor="mm")
-    return layer
+    # 아래쪽에 어두운 면을 먼저 깔아 두께감을 준다. 위에 밝은 면이 살짝 올라앉는다.
+    shade = Image.new("RGBA", (big, big), (0, 0, 0, 0))
+    _draw_handle(ImageDraw.Draw(shade), scale, GLYPH_SHADE + (255,))
+    layer.alpha_composite(shade, (0, int(9 * scale)))
+    face = Image.new("RGBA", (big, big), (0, 0, 0, 0))
+    _draw_handle(ImageDraw.Draw(face), scale, GLYPH_COLOR + (255,),
+                 fill=GLYPH_COLOR + (DOOR_FILL_ALPHA,))
+    layer.alpha_composite(face)
+    return layer.resize((size, size), Image.LANCZOS)
 
 
 def draw_arcs(size: int, mono: bool) -> Image.Image:
@@ -145,12 +112,11 @@ def draw_arcs(size: int, mono: bool) -> Image.Image:
 def draw_mark(size: int = 2560, mono: bool = False) -> Image.Image:
     layer = draw_arcs(size, mono)
     glyph = draw_glyph(size, mono)
-    if not mono:  # 수화기 뒤 은은한 광원
+    if not mono:  # 손잡이 뒤 은은한 광원
         glow = Image.new("RGBA", (size, size), (0, 0, 0, 0))
         glow.paste(GLYPH_GLOW + (190,), (0, 0), glyph.split()[3])
         layer.alpha_composite(glow.filter(ImageFilter.GaussianBlur(size * 0.022)))
     layer.alpha_composite(glyph)
-    layer.alpha_composite(draw_badge(size, mono))
     return layer
 
 
@@ -244,9 +210,9 @@ def save(img: Image.Image, rel: str, size: int, mode: str = "RGB") -> None:
 def main() -> None:
     full = master_full()
     # adaptive icon 은 원형 마스크가 씌워질 수 있어 모서리가 잘린다.
-    # 오른쪽 위 표식까지 안전 영역(안쪽 원) 에 들어오도록 비율을 낮춰 둔다.
-    fg = place_mark(Image.new("RGBA", (MASTER, MASTER), (0, 0, 0, 0)), 0.50)
-    fg_mono = place_mark(Image.new("RGBA", (MASTER, MASTER), (0, 0, 0, 0)), 0.50,
+    # 아크 끝까지 안전 영역(안쪽 원) 에 들어오도록 비율을 낮춰 둔다.
+    fg = place_mark(Image.new("RGBA", (MASTER, MASTER), (0, 0, 0, 0)), 0.54)
+    fg_mono = place_mark(Image.new("RGBA", (MASTER, MASTER), (0, 0, 0, 0)), 0.54,
                          mono=True)
     bg_only = make_background(MASTER).convert("RGB")
 
@@ -259,8 +225,8 @@ def main() -> None:
     save(full, "assets/icon/app_icon.png", 1024)
     save(fg, "assets/icon/app_icon_foreground.png", 1024, "RGBA")
     save(bg_only, "assets/icon/app_icon_background.png", 1024)
-    # Flutter JanusMark 위젯이 쓰는 수화기 레이어(1024 좌표계 그대로).
-    save(draw_glyph(), "assets/icon/call_glyph.png", 1024, "RGBA")
+    # Flutter DoorMark 위젯이 쓰는 손잡이 레이어(1024 좌표계 그대로).
+    save(draw_glyph(), "assets/icon/door_glyph.png", 1024, "RGBA")
 
     print("iOS AppIcon.appiconset")
     contents = json.loads(

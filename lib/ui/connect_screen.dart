@@ -13,7 +13,7 @@ import 'settings_screen.dart';
 import 'theme/app_theme.dart';
 import 'widgets/aurora_background.dart';
 import 'widgets/glass.dart';
-import 'widgets/janus_mark.dart';
+import 'widgets/door_mark.dart';
 
 /// 앱의 첫 화면. 저장된 단지·세대로 자격을 받아 등록까지 밀고 간다.
 ///
@@ -383,7 +383,7 @@ class _ConnectScreenState extends State<ConnectScreen> {
                       crossAxisAlignment: CrossAxisAlignment.stretch,
                       children: [
                         const Spacer(flex: 2),
-                        const JanusMark(width: 180),
+                        const DoorMark(width: 180),
                         const SizedBox(height: 8),
                         // 앱 이름. "I got the door" — 초인종이 울리면
                         // 내가 받고, 문도 내가 연다는 뜻이다.

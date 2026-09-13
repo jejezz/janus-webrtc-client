@@ -12,7 +12,7 @@ import 'theme/app_theme.dart';
 import 'widgets/aurora_background.dart';
 import 'widgets/glass.dart';
 import 'widgets/dial_pad.dart';
-import 'widgets/janus_mark.dart';
+import 'widgets/door_mark.dart';
 import 'widgets/pulse_avatar.dart';
 
 /// 다이얼러를 벗어난 이유. 호출한 쪽이 재등록할지 말지 가른다.
@@ -247,7 +247,7 @@ class _DialerScreenState extends State<DialerScreen> {
                 ? const SizedBox(width: double.infinity, height: 8)
                 : const Padding(
                     padding: EdgeInsets.only(bottom: 28),
-                    child: Center(child: JanusMark(width: 150)),
+                    child: Center(child: DoorMark(width: 150)),
                   ),
           ),
           GlassCard(

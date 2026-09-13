@@ -6,22 +6,22 @@ import 'package:flutter/services.dart';
 
 import '../theme/app_theme.dart';
 
-/// 앱 아이콘의 통화 마크를 화면에서도 그대로 쓰는 위젯.
+/// 앱 아이콘의 문·손잡이 마크를 화면에서도 그대로 쓰는 위젯.
 ///
-/// 말풍선은 아이콘 생성기가 만든 `assets/icon/call_glyph.png`(1024 좌표계)를 얹고,
-/// 시그널 아크만 벡터로 그려 신호가 퍼지듯 밝아지게 한다. 좌표를 고칠 일이
-/// 생기면 `tool/generate_app_icon.py` 와 아래 상수를 함께 맞춰야 한다.
-class JanusMark extends StatefulWidget {
-  const JanusMark({super.key, this.width = 120, this.animate = true});
+/// 문과 손잡이는 아이콘 생성기가 만든 `assets/icon/door_glyph.png`(1024 좌표계)
+/// 를 얹고, 시그널 아크만 벡터로 그려 초인종이 울리듯 밝아지게 한다. 좌표를
+/// 고칠 일이 생기면 `tool/generate_app_icon.py` 와 아래 상수를 함께 맞춰야 한다.
+class DoorMark extends StatefulWidget {
+  const DoorMark({super.key, this.width = 120, this.animate = true});
 
   final double width;
   final bool animate;
 
   @override
-  State<JanusMark> createState() => _JanusMarkState();
+  State<DoorMark> createState() => _DoorMarkState();
 }
 
-class _JanusMarkState extends State<JanusMark>
+class _DoorMarkState extends State<DoorMark>
     with SingleTickerProviderStateMixin {
   static Future<ui.Image>? _glyphFuture;
 
@@ -43,13 +43,13 @@ class _JanusMarkState extends State<JanusMark>
   }
 
   static Future<ui.Image> _loadGlyph() async {
-    final data = await rootBundle.load('assets/icon/call_glyph.png');
+    final data = await rootBundle.load('assets/icon/door_glyph.png');
     final codec = await ui.instantiateImageCodec(data.buffer.asUint8List());
     return (await codec.getNextFrame()).image;
   }
 
   @override
-  void didUpdateWidget(covariant JanusMark oldWidget) {
+  void didUpdateWidget(covariant DoorMark oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (widget.animate && !_controller.isAnimating) {
       _controller.repeat();
@@ -69,19 +69,19 @@ class _JanusMarkState extends State<JanusMark>
     return RepaintBoundary(
       child: SizedBox(
         width: widget.width,
-        height: widget.width * _JanusMarkPainter.contentAspect,
+        height: widget.width * _DoorMarkPainter.contentAspect,
         child: AnimatedBuilder(
           animation: _controller,
           builder: (context, _) =>
-              CustomPaint(painter: _JanusMarkPainter(_controller.value, _glyph)),
+              CustomPaint(painter: _DoorMarkPainter(_controller.value, _glyph)),
         ),
       ),
     );
   }
 }
 
-class _JanusMarkPainter extends CustomPainter {
-  const _JanusMarkPainter(this.t, this.glyph);
+class _DoorMarkPainter extends CustomPainter {
+  const _DoorMarkPainter(this.t, this.glyph);
 
   final double t;
   final ui.Image? glyph;
@@ -164,7 +164,7 @@ class _JanusMarkPainter extends CustomPainter {
     final image = glyph;
     if (image == null) return;
 
-    // 말풍선 뒤 은은한 광원.
+    // 문 뒤 은은한 광원.
     final glowRect = Rect.fromCircle(center: const Offset(512, 500), radius: 300);
     canvas.drawCircle(
       const Offset(512, 500),
@@ -187,6 +187,6 @@ class _JanusMarkPainter extends CustomPainter {
   }
 
   @override
-  bool shouldRepaint(_JanusMarkPainter oldDelegate) =>
+  bool shouldRepaint(_DoorMarkPainter oldDelegate) =>
       oldDelegate.t != t || oldDelegate.glyph != glyph;
 }
