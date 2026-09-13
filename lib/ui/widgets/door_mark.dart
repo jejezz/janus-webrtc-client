@@ -6,11 +6,12 @@ import 'package:flutter/services.dart';
 
 import '../theme/app_theme.dart';
 
-/// 앱 아이콘의 문·손잡이 마크를 화면에서도 그대로 쓰는 위젯.
+/// 앱 아이콘의 열린 문 마크를 화면에서도 그대로 쓰는 위젯.
 ///
-/// 문과 손잡이는 아이콘 생성기가 만든 `assets/icon/door_glyph.png`(1024 좌표계)
-/// 를 얹고, 시그널 아크만 벡터로 그려 초인종이 울리듯 밝아지게 한다. 좌표를
-/// 고칠 일이 생기면 `tool/generate_app_icon.py` 와 아래 상수를 함께 맞춰야 한다.
+/// 문은 아이콘 생성기가 만든 `assets/icon/door_glyph.png`(1024 좌표계, 원본은
+/// Icons8 "Door")를 얹고, 시그널 아크만 벡터로 그려 초인종이 울리듯 밝아지게
+/// 한다. 좌표를 고칠 일이 생기면 `tool/generate_app_icon.py` 와 아래 상수를
+/// 함께 맞춰야 한다.
 class DoorMark extends StatefulWidget {
   const DoorMark({super.key, this.width = 120, this.animate = true});
 
