@@ -300,6 +300,14 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       child: Text('EchoTest 로 연결만 확인'),
                     ),
                   ),
+                  const SizedBox(height: 24),
+                  // 아이콘의 문 그림은 Icons8 것이다. 무료 사용 조건이 출처 표기라
+                  // 여기 한 줄 둔다 (tool/generate_app_icon.py).
+                  const Text(
+                    'Icons by Icons8 · icons8.com',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(fontSize: 11, color: Colors.white30),
+                  ),
                 ],
               ),
             ),
